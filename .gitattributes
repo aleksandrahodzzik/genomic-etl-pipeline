@@ -1,0 +1,4 @@
+# Keep LF everywhere: shell scripts, Makefile recipes and lock files break with CRLF.
+* text=auto eol=lf
+*.png binary
+*.gz binary
