@@ -3,23 +3,19 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
-venv/
-env/
 
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
-coverage.xml
 
-# Environment
+# Environment (never commit real secrets)
 .env
 
-# Generated data & local DBs
-data/
-*.db
-*.sqlite3
+# Generated data: large files are produced on demand (`make data`)
+/data/
 
 # IDE / OS
 .idea/
