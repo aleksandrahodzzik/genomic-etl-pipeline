@@ -31,10 +31,25 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    Uuid,
+    text,
+)
+from sqlalchemy.orm import Session, registry
 
 from etl_client import ApiClient
 from variant_etl.db.session import get_engine
+from variant_etl.pipeline.reference import FastaReference
+from variant_etl.pipeline.transform import process_lines
 from variant_etl.storage.s3 import get_storage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -290,10 +305,120 @@ class Bench:
         }
 
 
-def fmt_stats(values: list[float]) -> str:
-    ordered = sorted(values)
-    p95 = ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))]
-    return f"{statistics.median(values):.2f} / {p95:.2f} / {max(values):.2f}"
+VARIANT_COLUMNS = [
+    "job_id", "chunk_index", "chrom", "pos", "ref", "alt", "qual", "filter",
+    "variant_type", "is_transition", "af", "was_normalized",
+]  # fmt: skip
+
+
+def sample_rows(data_dir: Path, count: int) -> list[tuple[Any, ...]]:
+    """Real variant rows, produced by the pipeline's own parser/normalizer."""
+    reference = FastaReference(data_dir / "ref.fa")
+    lines: list[str] = []
+    with (data_dir / "variants.vcf").open() as vcf:
+        for line in vcf:
+            if not line.startswith("#"):
+                lines.append(line.rstrip("\n"))
+            if len(lines) >= count:
+                break
+    result = process_lines(lines, 1, reference, 0)
+    reference.close()
+    job_id = uuid.uuid4()
+    return [(job_id, 0, *row) for row in result.rows[:count]]
+
+
+def insert_methods(engine: Any, data_dir: Path, count: int, repeats: int) -> dict[str, Any]:
+    """Insert the same rows with different mechanisms into an unindexed TEMP table (plus the
+    primary key, as in the real table), so only the insertion method differs."""
+    rows = sample_rows(data_dir, count)
+    columns = ", ".join(VARIANT_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(VARIANT_COLUMNS))
+    metadata = MetaData()
+    table = Table(
+        "bench_variants",
+        metadata,
+        Column("id", BigInteger, primary_key=True, autoincrement=True),
+        Column("job_id", Uuid), Column("chunk_index", Integer), Column("chrom", Text),
+        Column("pos", Integer), Column("ref", Text), Column("alt", Text),
+        Column("qual", Float), Column("filter", Text), Column("variant_type", String(8)),
+        Column("is_transition", Boolean), Column("af", Float), Column("was_normalized", Boolean),
+        prefixes=["TEMPORARY"],
+    )  # fmt: skip
+
+    class Row:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    registry().map_imperatively(Row, table)
+
+    results: dict[str, Any] = {"rows": len(rows), "methods": {}}
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TEMPORARY TABLE bench_variants (id bigserial PRIMARY KEY, job_id uuid,"
+                " chunk_index int, chrom text, pos int, ref text, alt text, qual double precision,"
+                " filter text, variant_type varchar(8), is_transition boolean,"
+                " af double precision, was_normalized boolean)"
+            )
+        )
+        conn.commit()
+        cursor = conn.connection.cursor()
+
+        def by_copy(batch: list[tuple[Any, ...]]) -> None:
+            with cursor.copy(f"COPY bench_variants ({columns}) FROM STDIN") as copy:
+                for row in batch:
+                    copy.write_row(row)
+
+        def by_executemany(batch: list[tuple[Any, ...]]) -> None:
+            cursor.executemany(
+                f"INSERT INTO bench_variants ({columns}) VALUES ({placeholders})", batch
+            )
+
+        def by_core(batch: list[tuple[Any, ...]]) -> None:
+            conn.execute(
+                table.insert(), [dict(zip(VARIANT_COLUMNS, row, strict=True)) for row in batch]
+            )
+
+        def by_orm(batch: list[tuple[Any, ...]]) -> None:
+            with Session(bind=conn) as session:
+                session.add_all(
+                    [Row(**dict(zip(VARIANT_COLUMNS, row, strict=True))) for row in batch]
+                )
+                session.commit()
+
+        def by_single_inserts(batch: list[tuple[Any, ...]]) -> None:
+            for row in batch:
+                cursor.execute(
+                    f"INSERT INTO bench_variants ({columns}) VALUES ({placeholders})", row
+                )
+
+        methods = [
+            ("COPY (what the pipeline uses)", by_copy, rows),
+            ("psycopg executemany (pipeline mode)", by_executemany, rows),
+            ("SQLAlchemy Core insert(), batched", by_core, rows),
+            ("SQLAlchemy ORM add_all + commit", by_orm, rows),
+            ("one INSERT per row, one round trip each", by_single_inserts, rows[:10_000]),
+        ]
+        for name, function, batch in methods:
+            timings = []
+            for _ in range(repeats):
+                conn.execute(text("TRUNCATE bench_variants"))
+                conn.commit()
+                started = time.perf_counter()
+                function(batch)
+                conn.commit()
+                timings.append(time.perf_counter() - started)
+            stored = conn.execute(text("SELECT count(*) FROM bench_variants")).scalar_one()
+            assert stored == len(batch), (name, stored, len(batch))
+            median = statistics.median(timings)
+            results["methods"][name] = {
+                "rows": len(batch),
+                "seconds": timings,
+                "rows_per_second": len(batch) / median,
+            }
+        conn.execute(text("DROP TABLE bench_variants"))
+        conn.commit()
+    return results
 
 
 def render(report: dict[str, Any]) -> str:
@@ -419,6 +544,26 @@ def render(report: dict[str, Any]) -> str:
             + ", ".join(f"`{n}` {s:.1f} s" for n, s in cost["index_build_s"].items())
             + ".",
         ]
+    inserts = report["insert_methods"]
+    copy_rate = inserts["methods"]["COPY (what the pipeline uses)"]["rows_per_second"]
+    lines += [
+        "",
+        "## 4. How the rows get into PostgreSQL",
+        "",
+        f"The same {inserts['rows']:,} real variant rows (made by the pipeline's own parser and "
+        "normalizer) inserted into a temporary table that has only a bigserial primary key, "
+        "median of 3 repetitions, commit included. This isolates the insertion mechanism; the real "
+        "table also maintains the two secondary indexes (section 3). The last row uses a smaller "
+        "batch because it is too slow to run on all rows; its rate is measured, not extrapolated.",
+        "",
+        "| method | rows | median time (s) | rows/s | vs COPY |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for name, m in inserts["methods"].items():
+        lines.append(
+            f"| {name} | {m['rows']:,} | {statistics.median(m['seconds']):.2f} | "
+            f"{m['rows_per_second']:,.0f} | {m['rows_per_second'] / copy_rate:.2f}x |"
+        )
     lines += ["", "## Raw numbers", "", "```json", json.dumps(report["raw"], indent=1), "```", ""]
     return "\n".join(lines)
 
@@ -431,6 +576,7 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--query-count", type=int, default=100)
+    parser.add_argument("--insert-rows", type=int, default=100_000)
     parser.add_argument("--skip-index-load", action="store_true")
     parser.add_argument("--out", default="docs/BENCHMARKS.md", type=Path)
     args = parser.parse_args()
@@ -456,6 +602,9 @@ def main() -> int:
         index_load = bench.index_load_cost()
         bench.vacuum()
 
+    print("== insert methods", flush=True)
+    insert_results = insert_methods(bench.engine, args.data_dir, args.insert_rows, repeats=3)
+
     params = truth["params"]
     report = {
         "specs": machine_specs(),
@@ -472,8 +621,10 @@ def main() -> int:
         "chunk_timings": chunk_timings,
         "queries": queries,
         "index_load_cost": index_load,
+        "insert_methods": insert_results,
     }
     report["raw"] = {
+        "insert_methods": insert_results,
         "scalability": scalability,
         "chunk_timings": chunk_timings,
         "region_query_ms": {
