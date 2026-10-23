@@ -6,7 +6,7 @@
 
 An asynchronous ETL service for genomic variant data. You upload a VCF and a reference FASTA straight to S3-compatible storage; a Celery chord splits the VCF into 100k-record chunks, independent worker containers validate and normalize them (equivalent to `bcftools norm -m -any -f`), bulk-load the result into an indexed PostgreSQL schema with `COPY`, and a FastAPI service serves statistics and keyset-paginated queries over it.
 
-- **Scales out by adding containers**: `docker compose up --scale worker=4`. On the 1M-record benchmark below, 1 → 4 workers cut the wall time from 33.7 s to 17.5 s on one laptop.
+- **Scales out by adding containers**: `docker compose up --scale worker=4`. On the 1M-record benchmark below, going from 1 to 4 workers cut the wall time by a factor of 1.7–1.9 on one laptop (two independent sessions).
 - **Safe to retry**: chunk writes are idempotent, so a crashed or redelivered chunk never produces duplicate rows (there is an integration test that forces exactly that).
 - **Checked against an independent implementation**: normalized output is compared record by record with `bcftools norm`, and a generator with a built-in ground truth checks the whole pipeline.
 
@@ -135,24 +135,24 @@ Row semantics worth knowing:
 
 | Measurement | Result |
 |---|---|
-| 1 worker container | 33.7 s, 29,674 records/s |
-| 2 worker containers | 20.5 s, 48,764 records/s (1.64x) |
-| 4 worker containers | 17.5 s, 57,247 records/s (1.93x) |
-| Region query (10 kb window), with `(job_id, chrom, pos)` index | median 2.40 ms, p95 3.50 ms |
-| Same query without the index | median 67.41 ms, p95 84.78 ms (28x slower) |
-| Keyset page (101 rows) from the middle of the job | 1.63 ms |
-| Inserting 100k rows: `COPY` vs. SQLAlchemy ORM `add_all` | 0.33 s vs. 14.47 s |
+| 1 worker container | 36.8 s, 27,142 records/s |
+| 2 worker containers | 22.6 s, 44,255 records/s (1.63x) |
+| 4 worker containers | 21.2 s, 47,261 records/s (1.74x) |
+| Region query (10 kb window), with `(job_id, chrom, pos)` index | median 2.09 ms, p95 3.02 ms |
+| Same query without the index | median 63.78 ms, p95 100.76 ms (31x slower) |
+| Keyset page (101 rows) from the middle of the job | 1.24 ms |
+| Inserting 100k rows: `COPY` vs. SQLAlchemy ORM `add_all` | 0.45 s vs. 15.89 s |
 
-Scaling is sub-linear on this machine because the workers share one CPU and one PostgreSQL instance with everything else; the benchmark doc says what was and was not isolated.
+The table is the latest run (`make bench` from a fresh clone). The same benchmark run earlier on the same machine gave 33.7 s / 20.5 s / 17.5 s for 1 / 2 / 4 workers (1.93x at 4), a 28x index speed-up, and 0.33 s vs. 14.47 s for `COPY` vs. the ORM, so treat the ratios and ranges as the result, not the exact figures. Scaling is sub-linear on this machine because the workers share one CPU and one PostgreSQL instance with everything else; [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) lists both sessions side by side and says what was and was not isolated.
 
 ## Design decisions
 
 - **Presigned uploads.** Files go from the client to object storage without passing through the API, so API memory and request timeouts do not depend on file size (VCFs run to many GB). The API only issues a short-lived URL and later checks that the objects exist. Presigned URLs are signed for `S3_PUBLIC_ENDPOINT_URL`, because the endpoint the client reaches is not the one containers use.
 - **Celery chord vs. one big task.** One task per file would make a failure at 95% cost the whole job, and cannot use more than one worker. The chunk is the unit of parallelism, of retry and of the database transaction. `split_job` builds the chord (`group(process_chunk) → finalize_job`) itself after it knows how many chunks there are. `process_chunk` *returns* a failure result for permanent errors instead of raising, so the chord body always runs and the job ends `failed` with the failing chunks listed, rather than hanging.
 - **At-least-once delivery + idempotent writes.** Workers use `acks_late` and `reject_on_worker_lost`, so a killed worker's chunk is redelivered; transient infrastructure errors (S3 5xx, database connection errors) are retried with jittered exponential backoff. Redelivery is made harmless in the loader: in one transaction it takes an advisory lock on `(job, chunk)`, deletes whatever that chunk previously wrote, `COPY`s the new rows and writes a marker row. A chunk whose marker already says `done` is skipped. `finalize` recomputes the job totals from committed markers, so a job is `completed` only when every chunk is.
-- **`COPY` vs. `executemany` vs. ORM.** For 100k rows into a bare table, `COPY` took 0.33 s, `executemany` 4.49 s, SQLAlchemy Core 5.56 s, the ORM 14.47 s ([benchmark section 4](docs/BENCHMARKS.md)). The pipeline uses psycopg 3's `COPY` for variants and rejected records; SQLAlchemy is used for the schema, migrations (Alembic) and the API queries.
-- **Indexes stay on during load.** Dropping them before a single large load saved 7.6 s of 33.7 s in the benchmark, but with chunks committing concurrently and results queryable as soon as a chunk lands, maintaining them is the simpler, always-correct choice. The trade-off is documented in the first migration.
-- **Index shape.** `(job_id, chrom, pos)` serves region queries and keyset pagination (`(chrom, pos, id)` cursor, no `OFFSET`); `(job_id, variant_type)` serves the by-type stats. The 28x difference above comes from `EXPLAIN ANALYZE`, not from guesswork.
+- **`COPY` vs. `executemany` vs. ORM.** For 100k rows into a bare table, `COPY` took 0.45 s, `executemany` 6.49 s, SQLAlchemy Core 7.83 s, the ORM 15.89 s ([benchmark section 4](docs/BENCHMARKS.md)). The pipeline uses psycopg 3's `COPY` for variants and rejected records; SQLAlchemy is used for the schema, migrations (Alembic) and the API queries.
+- **Indexes stay on during load.** Dropping them before a single large load and rebuilding afterwards did not give a reliable win in the benchmark (36.8 s vs. 37.5 s in one session, 33.7 s vs. 29.1 s in another), and with chunks committing concurrently and results queryable as soon as a chunk lands, maintaining them is the simpler, always-correct choice. The trade-off is documented in the first migration.
+- **Index shape.** `(job_id, chrom, pos)` serves region queries and keyset pagination (`(chrom, pos, id)` cursor, no `OFFSET`); `(job_id, variant_type)` serves the by-type stats. The roughly 30x difference above (28x and 31x in the two sessions) is measured with `EXPLAIN ANALYZE`, not guessed.
 - **S3 abstraction and the MinIO situation.** All storage access goes through `storage/s3.py` (boto3), so anything S3-compatible works. MinIO's community edition no longer publishes container images, so compose pins a community-maintained fork, `pgsty/minio`, at a fixed tag; switching to another S3-compatible store, or to AWS S3, is a matter of environment variables.
 - **A hand-written VCF parser instead of pysam.** The service needs 8 columns and streaming access, not the full htslib API. A small parser keeps the install pure-Python (no compiled htslib in the image), and every behaviour is covered by tests, including an oracle comparison with bcftools. The cost: only sites-only VCF is supported (see below).
 - **Dedup by content.** A job's identity is a checksum over both inputs (ETag and size), so resubmitting the same files returns the existing job (HTTP 200). A *failed* job is deleted and recreated on resubmit.
