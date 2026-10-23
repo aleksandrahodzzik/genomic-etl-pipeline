@@ -1,0 +1,160 @@
+{
+ "contigs": {
+  "chr1": 20000,
+  "chr2": 20000,
+  "chr3": 20000
+ },
+ "multi_allelic_records": 214,
+ "params": {
+  "contig_length": 20000,
+  "contigs": 3,
+  "error_rate": 0.01,
+  "seed": 7,
+  "titv": 2.0,
+  "variants": 3000
+ },
+ "records_accepted": 2970,
+ "records_rejected": 30,
+ "records_total": 3000,
+ "rejected_by_reason": {
+  "invalid_allele_chars": 4,
+  "malformed_line": 5,
+  "non_numeric_qual": 5,
+  "pos_out_of_bounds": 4,
+  "ref_mismatch": 4,
+  "unknown_contig": 4,
+  "unsupported_symbolic": 4
+ },
+ "rejected_lines": [
+  [
+   102,
+   "unsupported_symbolic"
+  ],
+  [
+   420,
+   "non_numeric_qual"
+  ],
+  [
+   433,
+   "non_numeric_qual"
+  ],
+  [
+   600,
+   "non_numeric_qual"
+  ],
+  [
+   826,
+   "pos_out_of_bounds"
+  ],
+  [
+   938,
+   "malformed_line"
+  ],
+  [
+   975,
+   "ref_mismatch"
+  ],
+  [
+   980,
+   "malformed_line"
+  ],
+  [
+   1008,
+   "ref_mismatch"
+  ],
+  [
+   1021,
+   "malformed_line"
+  ],
+  [
+   1099,
+   "unsupported_symbolic"
+  ],
+  [
+   1299,
+   "malformed_line"
+  ],
+  [
+   1323,
+   "pos_out_of_bounds"
+  ],
+  [
+   1430,
+   "invalid_allele_chars"
+  ],
+  [
+   1524,
+   "ref_mismatch"
+  ],
+  [
+   1527,
+   "non_numeric_qual"
+  ],
+  [
+   1696,
+   "invalid_allele_chars"
+  ],
+  [
+   1864,
+   "invalid_allele_chars"
+  ],
+  [
+   1942,
+   "unsupported_symbolic"
+  ],
+  [
+   2100,
+   "ref_mismatch"
+  ],
+  [
+   2298,
+   "invalid_allele_chars"
+  ],
+  [
+   2324,
+   "pos_out_of_bounds"
+  ],
+  [
+   2405,
+   "pos_out_of_bounds"
+  ],
+  [
+   2533,
+   "malformed_line"
+  ],
+  [
+   2543,
+   "unknown_contig"
+  ],
+  [
+   2710,
+   "unknown_contig"
+  ],
+  [
+   2747,
+   "unknown_contig"
+  ],
+  [
+   2773,
+   "unknown_contig"
+  ],
+  [
+   2842,
+   "non_numeric_qual"
+  ],
+  [
+   2972,
+   "unsupported_symbolic"
+  ]
+ ],
+ "rows_by_type": {
+  "DEL": 315,
+  "INS": 288,
+  "MNV": 38,
+  "SNV": 2620
+ },
+ "rows_total": 3261,
+ "snv_transitions": 1746,
+ "snv_transversions": 874,
+ "titv": 1.9977
+}

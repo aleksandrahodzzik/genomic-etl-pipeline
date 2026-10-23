@@ -24,7 +24,7 @@ class InMemoryReference:
         return self._contigs[chrom][max(start, 0) : end]
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def data_dir() -> Path:
     return DATA_DIR
 
