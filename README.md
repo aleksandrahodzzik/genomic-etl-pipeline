@@ -1,2 +1,2 @@
-﻿# Variant ETL
+# Variant ETL
 
