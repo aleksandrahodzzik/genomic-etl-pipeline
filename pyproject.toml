@@ -43,6 +43,10 @@ markers = [
     "integration: needs the docker compose stack (postgres, redis, minio, api, worker)",
     "oracle: compares our normalizer with bcftools norm",
 ]
+filterwarnings = [
+    # Starlette's TestClient warns about httpx on every import; nothing to act on here.
+    "ignore:Using `httpx` with `starlette.testclient`:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
