@@ -22,7 +22,8 @@ services:
       POSTGRES_USER: variants
       POSTGRES_PASSWORD: variants
       POSTGRES_DB: variants
-    ports: ["5432:5432"]
+    # Host ports can be moved if another project already uses them: POSTGRES_PORT=5433 make up
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     # Docker gives containers a 64 MB /dev/shm; parallel queries and VACUUM on a
     # million-row table need more dynamic shared memory than that and fail with DiskFull.
@@ -78,7 +79,7 @@ services:
 
   api:
     <<: *app
-    ports: ["8000:8000"]
+    ports: ["${API_PORT:-8000}:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       bucket-init: { condition: service_completed_successfully }
