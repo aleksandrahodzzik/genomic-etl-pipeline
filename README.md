@@ -53,7 +53,17 @@ make up      # postgres, redis, minio, migrations, api, worker; returns when eve
 make demo    # generates 200k records, uploads them, runs a job, prints the stats
 ```
 
-Then open the interactive API docs at <http://localhost:8000/docs>. Scale out with `docker compose up -d --scale worker=4`. Tear down with `make down` (this also deletes the volumes).
+Then open the web UI at <http://localhost:8000/> (the interactive API docs are at <http://localhost:8000/docs>). Scale out with `docker compose up -d --scale worker=4`. Tear down with `make down` (this also deletes the volumes).
+
+If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8010 POSTGRES_PORT=5433 make up`, then use `http://localhost:8010/`. (`make demo`, the benchmark and the tests default to the standard ports: pass `--api`, or set `API_URL` and `DATABASE_URL`, to follow the change.)
+
+### Web UI
+
+The API also serves a small single-page UI (plain HTML and JavaScript, no build step). Click **Try with sample data** or drop your own VCF and FASTA: the browser uploads straight to storage with presigned URLs, shows the job moving through split → process chunks → finalize, then the summary, variant types, reject reasons, allele-frequency histogram, per-chromosome density and a filterable, paginated variant table. It uses only the public REST API described below.
+
+![Home screen](docs/images/ui-home.png)
+
+![Results after processing the sample](docs/images/ui-results.png)
 
 Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)).
 
@@ -160,7 +170,7 @@ The table is the latest run (`make bench` from a fresh clone). The same benchmar
 ## Testing
 
 ```bash
-make test        # 171 tests; integration tests need `make up` first
+make test        # 174 tests; integration tests need `make up` first
 make lint        # ruff check, ruff format --check, mypy
 ```
 
@@ -183,7 +193,7 @@ make lint        # ruff check, ruff format --check, mypy
 
 ```
 src/variant_etl/
-  api/        FastAPI app and routers (jobs, stats)
+  api/        FastAPI app, routers (jobs, stats) and the single-page web UI (static/)
   pipeline/   VCF parser, validation, normalization, chunking, loader, Celery tasks
   storage/    S3 client wrapper, bucket initialization
   db/         SQLAlchemy models, sessions, analytics queries
