@@ -54,8 +54,15 @@ def completed_job(client, engine, storage, data_dir) -> Iterator[str]:
     original_chunk_size = settings.chunk_size
     settings.chunk_size = 1000  # 3000 records -> 3 chunks, so pagination crosses chunks
     try:
+        # Jobs are deduplicated by content. The same fixture may already have been processed
+        # through the web UI's "sample data" button or `make demo`, and this fixture drives the
+        # pipeline stages itself, so it needs a job of its own: a FASTA header comment changes
+        # the checksum without changing the sequence (pyfaidx keys on the first word).
+        ref = (data_dir / "ref.fa").read_bytes()
+        unique_ref = ref.replace(b">chr1\n", b">chr1 test-run-%s\n" % uuid.uuid4().hex.encode(), 1)
+        assert unique_ref != ref
         vcf_key = upload_via_api(client, "variants.vcf", (data_dir / "variants.vcf").read_bytes())
-        ref_key = upload_via_api(client, "ref.fa", (data_dir / "ref.fa").read_bytes())
+        ref_key = upload_via_api(client, "ref.fa", unique_ref)
         created = client.post("/api/v1/jobs", json={"vcf_key": vcf_key, "reference_key": ref_key})
         job_id = created.json()["id"]
         keys, reference_key = run_split(job_id)
