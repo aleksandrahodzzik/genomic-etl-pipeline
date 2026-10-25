@@ -59,7 +59,7 @@ If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8
 
 ### Web UI
 
-The API also serves a small single-page UI (plain HTML and JavaScript, no build step). Click **Try with sample data** or drop your own VCF and FASTA: the browser uploads straight to storage with presigned URLs, shows the job moving through split → process chunks → finalize, then the summary, variant types, reject reasons, allele-frequency histogram, per-chromosome density and a filterable, paginated variant table. It uses only the public REST API described below.
+The API also serves a small single-page UI (plain HTML and JavaScript, no build step). Click **Use sample data** or drop your own VCF and FASTA: the browser uploads straight to storage with presigned URLs, shows the job moving through split → process chunks → finalize, then the summary, variant types, reject reasons, allele-frequency histogram, per-chromosome density and a filterable, paginated variant table. It uses only the public REST API described below.
 
 **Opening it from a phone on the same Wi-Fi.** The browser uploads files straight to MinIO, so the presigned URLs must point at an address the phone can reach, not `localhost`:
 
