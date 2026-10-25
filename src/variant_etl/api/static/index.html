@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variant ETL</title>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121933; --panel2: #182042; --border: #263057;
+    --text: #e8ecff; --muted: #8e98c8; --accent: #7c5cff; --accent2: #22d3ee;
+    --ok: #34d399; --bad: #fb7185; --warn: #fbbf24;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text); background: var(--bg);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background-image: radial-gradient(900px 400px at 15% -10%, rgba(124,92,255,.25), transparent),
+                      radial-gradient(700px 400px at 90% 0%, rgba(34,211,238,.14), transparent);
+    background-repeat: no-repeat;
+  }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 22px;
+          background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 16px; align-items: center; font-size: 14px; }
+  .health { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.bad { background: var(--bad); }
+
+  .hero { margin: 34px 0 22px; }
+  .hero h2 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; }
+  .hero p { color: var(--muted); max-width: 720px; margin: 0; font-size: 16px; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-top: 18px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .how { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .how b { display: block; margin-bottom: 4px; }
+  .how span { color: var(--muted); font-size: 13px; }
+  .num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+         background: var(--accent); font-size: 12px; font-weight: 700; margin-right: 8px; }
+
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .drop { border: 2px dashed var(--border); border-radius: 14px; padding: 22px 16px; text-align: center; cursor: pointer;
+          transition: .15s; background: var(--panel2); }
+  .drop:hover, .drop.over { border-color: var(--accent); background: rgba(124,92,255,.10); }
+  .drop.has { border-style: solid; border-color: var(--ok); }
+  .drop .big { font-size: 26px; }
+  .drop .name { font-weight: 600; margin-top: 6px; word-break: break-all; }
+  .drop .desc { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .drop input { display: none; }
+
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--border); padding: 10px 18px;
+           background: var(--panel2); color: var(--text); transition: .15s; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: linear-gradient(135deg, var(--accent), #5b8cff); border: 0; font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.12); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .or { color: var(--muted); font-size: 13px; }
+
+  .stepper { display: flex; align-items: center; gap: 0; margin: 6px 0 18px; }
+  .st { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .st i { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 13px;
+          border: 2px solid var(--border); }
+  .st.active { color: var(--text); }
+  .st.active i { border-color: var(--accent2); color: var(--accent2); animation: pulse 1.2s infinite; }
+  .st.done { color: var(--text); }
+  .st.done i { background: var(--ok); border-color: var(--ok); color: #05281c; }
+  .st.err i { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .line { flex: 1; height: 2px; background: var(--border); margin: 0 10px; min-width: 14px; }
+  .line.done { background: var(--ok); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(34,211,238,.15); } }
+
+  .bar { height: 10px; border-radius: 6px; background: var(--panel2); overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
+  .status-line { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .banner { border-radius: 10px; padding: 10px 14px; margin-top: 14px; font-size: 14px; }
+  .banner.info { background: rgba(34,211,238,.10); border: 1px solid rgba(34,211,238,.35); }
+  .banner.err { background: rgba(251,113,133,.10); border: 1px solid rgba(251,113,133,.45); }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kpi { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .kpi .v { font-size: 26px; font-weight: 700; letter-spacing: -.5px; }
+  .kpi .l { color: var(--muted); font-size: 12.5px; }
+  .kpi .n { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .hbar { display: grid; grid-template-columns: 170px 1fr 56px; gap: 10px; align-items: center; margin: 9px 0; font-size: 13px; }
+  .hbar .t { height: 12px; border-radius: 6px; background: var(--panel2); overflow: hidden; }
+  .hbar .t > div { height: 100%; border-radius: 6px; }
+  .hbar .c { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hbar small { display: block; color: var(--muted); font-size: 11.5px; }
+
+  .hist { display: flex; align-items: flex-end; gap: 6px; height: 150px; margin-top: 8px; }
+  .hist div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+  .hist b { width: 100%; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, var(--accent2), var(--accent)); min-height: 2px; }
+  .hist span { font-size: 10.5px; color: var(--muted); margin-top: 5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid rgba(38,48,87,.6); }
+  td.m, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .tablewrap { overflow-x: auto; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .tab { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab button { padding: 6px 14px; font-size: 13px; }
+  .tab button.on { background: var(--accent); border-color: var(--accent); }
+  select { font: inherit; background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; padding: 6px 10px; }
+  .filters { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+  .tip { cursor: help; color: var(--accent2); border-bottom: 1px dotted var(--accent2); }
+  .hidden { display: none !important; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; text-align: center; }
+
+  @media (max-width: 760px) {
+    .steps, .drops, .grid2 { grid-template-columns: 1fr; }
+    .stepper { flex-wrap: wrap; gap: 8px; } .line { display: none; }
+    .hero h2 { font-size: 24px; }
+    .hbar { grid-template-columns: 120px 1fr 50px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">🧬</div>
+      <div><h1>Variant ETL</h1><div class="sub">Genomic variant pipeline &amp; analytics</div></div>
+    </div>
+    <nav>
+      <span class="health"><span class="dot" id="healthDot"></span><span id="healthText">checking…</span></span>
+      <a href="/docs">API docs</a>
+      <a href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h2>Turn a raw genome variant file into clean, queryable data.</h2>
+    <p>Upload a VCF file (a list of DNA differences) and a reference genome. The service checks every line,
+       fixes how each change is written, stores the result in a database, and shows you the statistics.</p>
+  </section>
+
+  <section class="card">
+    <h3>How it works</h3>
+    <p class="hint">What happens behind the button, in four steps.</p>
+    <div class="steps">
+      <div class="how"><b><span class="num">1</span>Upload</b><span>Your browser sends the files straight to object storage (S3). The API never handles the bytes.</span></div>
+      <div class="how"><b><span class="num">2</span>Split</b><span>One worker cuts the big file into chunks of 100,000 records.</span></div>
+      <div class="how"><b><span class="num">3</span>Process</b><span>Many workers handle chunks in parallel: reject bad lines, normalize the rest, bulk-load into PostgreSQL.</span></div>
+      <div class="how"><b><span class="num">4</span>Finalize &amp; query</b><span>Totals are computed and the API serves statistics and searchable variants.</span></div>
+    </div>
+  </section>
+
+  <section class="card" id="uploadCard">
+    <h3>Run a job</h3>
+    <p class="hint">Use the built-in sample (3,000 records with some deliberate errors), or drop your own files.</p>
+    <div class="drops">
+      <label class="drop" id="dropVcf">
+        <div class="big">📄</div>
+        <div class="name" id="nameVcf">Variants (.vcf or .vcf.gz)</div>
+        <div class="desc">Click or drop a file here</div>
+        <input type="file" id="fileVcf" accept=".vcf,.gz">
+      </label>
+      <label class="drop" id="dropRef">
+        <div class="big">🧬</div>
+        <div class="name" id="nameRef">Reference (.fa or .fa.gz)</div>
+        <div class="desc">Click or drop a file here</div>
+        <input type="file" id="fileRef" accept=".fa,.fasta,.fna,.gz">
+      </label>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnRun" disabled>Start processing</button>
+      <span class="or">or</span>
+      <button id="btnSample">✨ Try with sample data</button>
+    </div>
+    <div id="banner"></div>
+  </section>
+
+  <section class="card hidden" id="progressCard">
+    <h3>Progress</h3>
+    <p class="hint" id="jobLine"></p>
+    <div class="stepper" id="stepper"></div>
+    <div class="bar"><div id="barFill"></div></div>
+    <div class="status-line"><span id="statusText">Starting…</span><span id="chunkText"></span></div>
+  </section>
+
+  <div id="results" class="hidden">
+    <section class="card">
+      <h3>Summary</h3>
+      <p class="hint" id="summaryHint"></p>
+      <div class="kpis" id="kpis"></div>
+    </section>
+
+    <div class="grid2">
+      <section class="card"><h3>Variant types</h3>
+        <p class="hint">SNV = one letter changed, INS/DEL = letters added or removed, MNV = several letters changed.</p>
+        <div id="types"></div></section>
+      <section class="card"><h3>Rejected lines</h3>
+        <p class="hint">Lines the pipeline refused, grouped by the reason.</p>
+        <div id="reasons"></div></section>
+    </div>
+
+    <div class="grid2">
+      <section class="card"><h3>Allele frequency</h3>
+        <p class="hint">How common each variant is in the population (0 = rare, 1 = everyone).</p>
+        <div class="hist" id="hist"></div></section>
+      <section class="card"><h3>Per chromosome</h3>
+        <p class="hint">Variant count and density (variants per megabase).</p>
+        <div id="chroms"></div></section>
+    </div>
+
+    <section class="card">
+      <div class="tab">
+        <button id="tabVar" class="on">Variants</button>
+        <button id="tabRej">Rejected sample</button>
+      </div>
+      <div id="paneVar">
+        <div class="filters">
+          Chromosome <select id="fChrom"><option value="">all</option></select>
+          Type <select id="fType"><option value="">all</option><option>SNV</option><option>INS</option><option>DEL</option><option>MNV</option><option>COMPLEX</option></select>
+          <span id="varCount"></span>
+        </div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Position</th><th>Change</th><th>Type</th><th>Quality</th><th>Freq.</th><th>Normalized</th></tr></thead>
+          <tbody id="varBody"></tbody></table></div>
+        <div class="row"><button id="btnMore" class="hidden">Load more</button></div>
+      </div>
+      <div id="paneRej" class="hidden">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Line</th><th>Reason</th><th>Raw text</th></tr></thead>
+          <tbody id="rejBody"></tbody></table></div>
+        <div class="row"><button id="btnMoreRej" class="hidden">Load more</button></div>
+      </div>
+    </section>
+  </div>
+
+  <footer>Python · FastAPI · Celery · PostgreSQL · S3 &nbsp;|&nbsp; <a href="/docs">Explore the REST API</a></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n) => Number(n).toLocaleString("en-US");
+const API = "/api/v1";
+
+const TYPE_COLOR = { SNV: "#22d3ee", INS: "#34d399", DEL: "#fb7185", MNV: "#fbbf24", COMPLEX: "#7c5cff" };
+const REASONS = {
+  malformed_line: ["Malformed line", "Wrong number of columns, a bad position, or an empty field."],
+  non_numeric_qual: ["Bad quality value", "The QUAL column is not a number."],
+  unknown_contig: ["Unknown chromosome", "The chromosome is not in the reference genome."],
+  pos_out_of_bounds: ["Position out of range", "The position is outside the chromosome."],
+  unsupported_symbolic: ["Unsupported variant", "Symbolic alleles such as &lt;DEL&gt; are not supported."],
+  invalid_allele_chars: ["Invalid letters", "Alleles may only contain A, C, G, T, N."],
+  ref_mismatch: ["Reference mismatch", "The file's REF letters differ from the real genome at that spot."],
+};
+
+let vcfFile = null, refFile = null, jobId = null, busy = false;
+let varCursor = null, rejCursor = null;
+
+// ---------- health ----------
+async function checkHealth() {
+  try {
+    const r = await fetch("/health");
+    $("healthDot").className = "dot " + (r.ok ? "ok" : "bad");
+    $("healthText").textContent = r.ok ? "API online" : "API unavailable";
+  } catch { $("healthDot").className = "dot bad"; $("healthText").textContent = "API unreachable"; }
+}
+checkHealth(); setInterval(checkHealth, 15000);
+
+// ---------- file pickers ----------
+function wireDrop(box, input, nameEl, setter, placeholder) {
+  const show = (f) => {
+    setter(f); nameEl.textContent = f ? f.name : placeholder;
+    box.classList.toggle("has", !!f); refreshRun();
+  };
+  input.addEventListener("change", () => show(input.files[0] || null));
+  ["dragenter", "dragover"].forEach((e) => box.addEventListener(e, (ev) => { ev.preventDefault(); box.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((e) => box.addEventListener(e, (ev) => { ev.preventDefault(); box.classList.remove("over"); }));
+  box.addEventListener("drop", (ev) => { if (ev.dataTransfer.files[0]) show(ev.dataTransfer.files[0]); });
+}
+wireDrop($("dropVcf"), $("fileVcf"), $("nameVcf"), (f) => (vcfFile = f), "Variants (.vcf or .vcf.gz)");
+wireDrop($("dropRef"), $("fileRef"), $("nameRef"), (f) => (refFile = f), "Reference (.fa or .fa.gz)");
+function refreshRun() { $("btnRun").disabled = busy || !(vcfFile && refFile); $("btnSample").disabled = busy; }
+
+$("btnRun").onclick = () => run(vcfFile, refFile);
+$("btnSample").onclick = async () => {
+  try {
+    const [v, r] = await Promise.all(["variants.vcf", "ref.fa"].map(async (n) => {
+      const res = await fetch("/static/sample/" + n);
+      if (!res.ok) throw new Error("sample file missing");
+      return new File([await res.blob()], n);
+    }));
+    run(v, r);
+  } catch (e) { banner("err", "Could not load the sample: " + e.message); }
+};
+
+function banner(kind, text) { $("banner").innerHTML = text ? `<div class="banner ${kind}">${esc(text)}</div>` : ""; }
+
+// ---------- API helpers ----------
+async function api(path, opts) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {}
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+async function upload(file) {
+  const meta = await api("/uploads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: file.name }) });
+  const put = await fetch(meta.upload_url, { method: "PUT", body: file });
+  await put.text(); // drain the body so the browser does not report the request as aborted
+  if (!put.ok) throw new Error("upload to storage failed (" + put.status + ")");
+  return meta.key;
+}
+
+// ---------- stepper ----------
+const STEPS = ["Upload", "Split", "Process chunks", "Finalize"];
+function drawStepper(active, failed) {
+  let html = "";
+  STEPS.forEach((name, i) => {
+    const cls = failed && i === active ? "err" : i < active ? "done" : i === active ? "active" : "";
+    const icon = failed && i === active ? "!" : i < active ? "✓" : i + 1;
+    html += `<div class="st ${cls}"><i>${icon}</i>${name}</div>`;
+    if (i < STEPS.length - 1) html += `<div class="line ${i < active ? "done" : ""}"></div>`;
+  });
+  $("stepper").innerHTML = html;
+}
+
+// ---------- run a job ----------
+async function run(vcf, ref) {
+  if (busy) return;
+  busy = true; refreshRun(); banner("", "");
+  $("results").classList.add("hidden");
+  $("progressCard").classList.remove("hidden");
+  $("jobLine").textContent = "";
+  $("barFill").style.width = "3%"; $("chunkText").textContent = "";
+  drawStepper(0, false); $("statusText").textContent = "Uploading files directly to object storage…";
+  $("progressCard").scrollIntoView({ behavior: "smooth", block: "center" });
+  try {
+    const [vcfKey, refKey] = await Promise.all([upload(vcf), upload(ref)]);
+    drawStepper(1, false); $("statusText").textContent = "Creating the job…";
+    const job = await api("/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ vcf_key: vcfKey, reference_key: refKey }) });
+    jobId = job.id;
+    $("jobLine").innerHTML = `Job <span class="mono">${esc(job.id)}</span>`;
+    if (job.deduplicated) banner("info", "These exact files were already processed. Showing the existing result instead of redoing the work.");
+    const done = await poll(job.id);
+    if (done.status === "completed") await showResults(done);
+  } catch (e) {
+    drawStepper(1, true); banner("err", e.message); $("statusText").textContent = "Stopped";
+  } finally { busy = false; refreshRun(); }
+}
+
+async function poll(id) {
+  for (;;) {
+    const j = await api("/jobs/" + id);
+    const p = j.progress, total = p.chunks_total;
+    if (j.status === "completed") {
+      drawStepper(4, false); $("barFill").style.width = "100%";
+      $("statusText").textContent = `Done in ${j.duration_seconds?.toFixed(1) ?? "?"} s`;
+      $("chunkText").textContent = total ? `${total}/${total} chunks` : "";
+      return j;
+    }
+    if (j.status === "failed") {
+      drawStepper(total ? 2 : 1, true); $("statusText").textContent = "Job failed";
+      banner("err", (j.error || "The job failed.") + (j.failed_chunks?.length ? ` Failed chunks: ${j.failed_chunks.join(", ")}` : ""));
+      return j;
+    }
+    if (!total) { drawStepper(1, false); $("statusText").textContent = j.status === "queued" ? "Waiting for a worker…" : "Splitting the file into chunks…"; $("barFill").style.width = "8%"; }
+    else {
+      drawStepper(2, false); $("statusText").textContent = "Workers are validating and loading chunks…";
+      $("chunkText").textContent = `${p.chunks_done}/${total} chunks`;
+      $("barFill").style.width = Math.max(10, Math.round(100 * p.fraction)) + "%";
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+// ---------- results ----------
+function kpi(value, label, note) { return `<div class="kpi"><div class="v">${value}</div><div class="l">${label}</div>${note ? `<div class="n">${note}</div>` : ""}</div>`; }
+function hbar(label, count, max, color, note) {
+  const w = max ? Math.max(2, (100 * count) / max) : 0;
+  return `<div class="hbar"><div>${label}${note ? `<small>${note}</small>` : ""}</div><div class="t"><div style="width:${w}%;background:${color}"></div></div><div class="c">${fmt(count)}</div></div>`;
+}
+
+async function showResults(job) {
+  const base = "/jobs/" + job.id;
+  const [sum, chr, af] = await Promise.all([api(base + "/stats/summary"), api(base + "/stats/chromosomes"), api(base + "/stats/af-histogram?bins=10")]);
+  $("results").classList.remove("hidden");
+  const r = sum.records;
+  $("summaryHint").textContent = `${fmt(r.total)} lines went in; ${fmt(sum.variants)} clean variant rows are now in the database (a line with several alternatives becomes several rows).`;
+  $("kpis").innerHTML =
+    kpi(fmt(r.total), "records read") +
+    kpi(fmt(r.accepted), "accepted", `${(100 - r.rejected_percent).toFixed(1)}% of lines`) +
+    kpi(fmt(r.rejected), "rejected", `${r.rejected_percent}% of lines`) +
+    kpi(fmt(sum.variants), "variants stored") +
+    kpi(sum.titv_ratio ?? "–", `<span class="tip" title="Transition/transversion ratio of single-letter changes. About 2.0 is typical for human genomes; far off suggests errors.">Ti/Tv ratio</span>`) +
+    kpi(sum.normalized_percent + "%", `<span class="tip" title="Share of rows rewritten into the standard form (trimmed and left-aligned, or split from a multi-allelic line).">normalized</span>`, `${fmt(sum.normalized)} rows`);
+
+  const maxT = Math.max(...Object.values(sum.by_type), 1);
+  $("types").innerHTML = Object.entries(sum.by_type).sort((a, b) => b[1] - a[1])
+    .map(([t, c]) => hbar(t, c, maxT, TYPE_COLOR[t] || "#7c5cff")).join("") || "<span class='sub'>No variants.</span>";
+
+  const reasons = Object.entries(sum.rejected_by_reason).sort((a, b) => b[1].count - a[1].count);
+  const maxR = Math.max(...reasons.map(([, v]) => v.count), 1);
+  $("reasons").innerHTML = reasons.map(([k, v]) => {
+    const [title, desc] = REASONS[k] || [k, ""];
+    return hbar(title, v.count, maxR, "#fb7185", desc);
+  }).join("") || "<span class='sub'>Nothing was rejected.</span>";
+
+  const maxA = Math.max(...af.bins.map((b) => b.count), 1);
+  $("hist").innerHTML = af.bins.map((b) =>
+    `<div title="${b.bin_start.toFixed(1)}–${b.bin_end.toFixed(1)}: ${fmt(b.count)} variants"><b style="height:${(100 * b.count) / maxA}%"></b><span>${b.bin_start.toFixed(1)}</span></div>`).join("");
+
+  const maxC = Math.max(...chr.chromosomes.map((c) => c.variants), 1);
+  $("chroms").innerHTML = chr.chromosomes.map((c) =>
+    hbar(esc(c.chrom), c.variants, maxC, "#7c5cff", c.density_per_mb != null ? `${fmt(Math.round(c.density_per_mb))} per Mb` : "")).join("");
+
+  $("fChrom").innerHTML = '<option value="">all</option>' + chr.chromosomes.map((c) => `<option>${esc(c.chrom)}</option>`).join("");
+  await loadVariants(true); await loadRejected(true);
+  $("results").scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- variants table ----------
+async function loadVariants(reset) {
+  if (reset) { varCursor = null; $("varBody").innerHTML = ""; }
+  const q = new URLSearchParams({ limit: "25" });
+  if ($("fChrom").value) q.set("chrom", $("fChrom").value);
+  if ($("fType").value) q.set("type", $("fType").value);
+  if (varCursor) q.set("cursor", varCursor);
+  const page = await api(`/jobs/${jobId}/variants?${q}`);
+  $("varBody").insertAdjacentHTML("beforeend", page.items.map((v) => `
+    <tr><td class="m">${esc(v.chrom)}:${fmt(v.pos)}</td>
+    <td class="m">${esc(v.ref.length > 14 ? v.ref.slice(0, 14) + "…" : v.ref)} → ${esc(v.alt.length > 14 ? v.alt.slice(0, 14) + "…" : v.alt)}</td>
+    <td><span class="badge" style="background:${TYPE_COLOR[v.variant_type] || "#7c5cff"}22;color:${TYPE_COLOR[v.variant_type] || "#7c5cff"}">${esc(v.variant_type)}</span></td>
+    <td>${v.qual ?? "–"}</td><td>${v.af ?? "–"}</td>
+    <td>${v.was_normalized ? '<span class="badge" style="background:#fbbf2422;color:#fbbf24">rewritten</span>' : '<span class="sub">as written</span>'}</td></tr>`).join(""));
+  varCursor = page.next_cursor;
+  $("btnMore").classList.toggle("hidden", !varCursor);
+  $("varCount").textContent = $("varBody").children.length ? `showing ${$("varBody").children.length}` : "no matching variants";
+}
+$("fChrom").onchange = () => loadVariants(true);
+$("fType").onchange = () => loadVariants(true);
+$("btnMore").onclick = () => loadVariants(false);
+
+// ---------- rejected table ----------
+async function loadRejected(reset) {
+  if (reset) { rejCursor = null; $("rejBody").innerHTML = ""; }
+  const q = new URLSearchParams({ limit: "25" });
+  if (rejCursor != null) q.set("after_line", rejCursor);
+  const page = await api(`/jobs/${jobId}/rejected?${q}`);
+  $("rejBody").insertAdjacentHTML("beforeend", page.items.map((x) => `
+    <tr><td class="m">${x.line_no}</td><td>${esc((REASONS[x.reason] || [x.reason])[0])}</td>
+    <td class="m">${esc(x.raw_line.length > 90 ? x.raw_line.slice(0, 90) + "…" : x.raw_line)}</td></tr>`).join(""));
+  rejCursor = page.next_after_line ?? null;
+  $("btnMoreRej").classList.toggle("hidden", rejCursor == null || page.items.length === 0);
+}
+$("btnMoreRej").onclick = () => loadRejected(false);
+
+$("tabVar").onclick = () => { $("tabVar").classList.add("on"); $("tabRej").classList.remove("on"); $("paneVar").classList.remove("hidden"); $("paneRej").classList.add("hidden"); };
+$("tabRej").onclick = () => { $("tabRej").classList.add("on"); $("tabVar").classList.remove("on"); $("paneRej").classList.remove("hidden"); $("paneVar").classList.add("hidden"); };
+refreshRun();
+</script>
+</body>
+</html>
