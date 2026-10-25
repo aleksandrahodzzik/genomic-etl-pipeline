@@ -61,6 +61,22 @@ If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8
 
 The API also serves a small single-page UI (plain HTML and JavaScript, no build step). Click **Try with sample data** or drop your own VCF and FASTA: the browser uploads straight to storage with presigned URLs, shows the job moving through split → process chunks → finalize, then the summary, variant types, reject reasons, allele-frequency histogram, per-chromosome density and a filterable, paginated variant table. It uses only the public REST API described below.
 
+**Opening it from a phone on the same Wi-Fi.** The browser uploads files straight to MinIO, so the presigned URLs must point at an address the phone can reach, not `localhost`:
+
+```powershell
+# on the computer: find its LAN address (e.g. 192.168.1.20), then
+$env:S3_PUBLIC_ENDPOINT_URL = "http://192.168.1.20:9000"
+docker compose up -d --build --wait
+# on the phone: http://192.168.1.20:8000/
+```
+
+Windows Firewall blocks incoming connections on networks marked *Public*. On a trusted home network, set the network to *Private* and allow the two ports from an administrator PowerShell (and remove the rule afterwards; MinIO uses the default `minioadmin` demo credentials, so do not leave it open on a shared network):
+
+```powershell
+New-NetFirewallRule -DisplayName "Variant ETL (phone)" -Direction Inbound -Protocol TCP -LocalPort 8000,9000 -Action Allow -Profile Private
+Remove-NetFirewallRule -DisplayName "Variant ETL (phone)"   # when done
+```
+
 ![Home screen](docs/images/ui-home.png)
 
 ![Results after processing the sample](docs/images/ui-results.png)
