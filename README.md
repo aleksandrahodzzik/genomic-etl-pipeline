@@ -81,6 +81,10 @@ Remove-NetFirewallRule -DisplayName "Variant ETL (phone)"   # when done
 
 ![Results after processing the sample](docs/images/ui-results.png)
 
+There is a light and a dark theme (the button in the header switches them; the choice is remembered in the browser).
+
+![Results, dark theme](docs/images/ui-results-dark.png)
+
 Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)).
 
 > **Windows without `make`**: the Makefile is a thin wrapper, so run the commands it contains. For example, `docker compose up -d --build --wait` is `make up`; the recipes for `demo` and `bench` are two `uv run python scripts/...` lines.

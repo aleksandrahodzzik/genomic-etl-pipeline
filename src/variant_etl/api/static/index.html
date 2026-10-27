@@ -4,21 +4,52 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Variant ETL</title>
+<script>
+  // Apply the saved theme before the first paint so the page does not flash light.
+  try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 <style>
   :root {
-    --bg: #f6f5f1; --card: #ffffff; --soft: #faf9f6; --line: #e3e0d8; --line2: #cfcbc0;
-    --ink: #1b2430; --muted: #667085; --accent: #1f3a5f; --accent-d: #162b48;
+    color-scheme: light;
+    --base: #e4eaf3;
+    --page: linear-gradient(180deg, #dfe6f0 0%, #e9eef5 38%, #e2e9f2 100%);
+    --glow: radial-gradient(1100px 520px at 50% -140px, rgba(31,58,95,.26), transparent 72%);
+    --card: rgba(255,255,255,.62); --soft: rgba(31,58,95,.055); --field: rgba(255,255,255,.78);
+    --line: rgba(31,58,95,.17); --line2: rgba(31,58,95,.30); --track: rgba(31,58,95,.13);
+    --ink: #132033; --muted: #55667d;
+    --accent: #1f3a5f; --btn: #1f3a5f; --btn-h: #162b48;
     --ok: #2f6f5e; --bad: #a64b3f; --warn: #8a6620;
+    --accent-soft: rgba(31,58,95,.09); --ok-soft: rgba(47,111,94,.12); --bad-soft: rgba(166,75,63,.09);
+    --c-snv: #1f3a5f; --c-ins: #3d7a68; --c-del: #a64b3f; --c-mnv: #b0842f; --c-complex: #6c7184; --bar: #1f3a5f;
+    --shadow: 0 1px 2px rgba(19,32,51,.05), 0 8px 24px rgba(31,58,95,.07);
     --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --base: #0a1220;
+    --page: linear-gradient(180deg, #0a1220 0%, #0d1727 45%, #0a1220 100%);
+    --glow: radial-gradient(1100px 520px at 50% -140px, rgba(94,148,230,.22), transparent 72%);
+    --card: rgba(255,255,255,.045); --soft: rgba(255,255,255,.04); --field: rgba(255,255,255,.07);
+    --line: rgba(255,255,255,.10); --line2: rgba(255,255,255,.22); --track: rgba(255,255,255,.10);
+    --ink: #e8edf5; --muted: #8f9cb2;
+    --accent: #8fb4ec; --btn: #3a68a8; --btn-h: #4a79bd;
+    --ok: #62b8a0; --bad: #e0857a; --warn: #d8a94f;
+    --accent-soft: rgba(143,180,236,.10); --ok-soft: rgba(98,184,160,.12); --bad-soft: rgba(224,133,122,.10);
+    --c-snv: #78a3e6; --c-ins: #62b8a0; --c-del: #e0857a; --c-mnv: #d8a94f; --c-complex: #9aa3bd; --bar: #78a3e6;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; color: var(--ink); background: var(--bg);
-         font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  /* The tint covers the whole page height (not just the window), so it runs end to end. */
+  html { background: var(--base); }
+  body { margin: 0; color: var(--ink);
+         background: var(--glow), var(--page); background-repeat: no-repeat; min-height: 100vh;
+         font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+         transition: color .25s; }
   a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
   a:hover { border-bottom-color: var(--accent); }
   .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px 80px; }
-  .topbar { height: 4px; background: var(--accent); }
+  .topbar { height: 4px; background: var(--btn); }
 
   header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
            padding: 22px 0; border-bottom: 1px solid var(--line); }
@@ -30,12 +61,19 @@
   .health { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line2); }
   .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  button.theme { width: 36px; height: 36px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+                 background: var(--field); border: 1px solid var(--line2); color: var(--ink); }
+  button.theme svg { width: 18px; height: 18px; }
+  button.theme .sun { display: none; }
+  :root[data-theme="dark"] button.theme .sun { display: block; }
+  :root[data-theme="dark"] button.theme .moon { display: none; }
 
   .hero { padding: 48px 0 12px; max-width: 760px; }
   .hero h2 { font: 400 36px/1.2 var(--serif); letter-spacing: -.4px; margin: 0 0 14px; }
   .hero p { color: var(--muted); margin: 0; font-size: 16.5px; line-height: 1.65; }
 
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 26px 28px; margin-top: 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 26px 28px; margin-top: 22px;
+          box-shadow: var(--shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .card h3 { margin: 0 0 4px; font: 600 17px/1.3 var(--serif); }
   .card .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; }
   .eyebrow { text-transform: uppercase; letter-spacing: 1.2px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
@@ -48,10 +86,10 @@
   .how span { color: var(--muted); font-size: 13.5px; display: block; }
 
   .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .drop { border: 1px dashed var(--line2); border-radius: 8px; padding: 26px 18px; text-align: center; cursor: pointer;
+  .drop { border: 1px dashed var(--line2); border-radius: 10px; padding: 26px 18px; text-align: center; cursor: pointer;
           background: var(--soft); transition: border-color .15s, background .15s; }
-  .drop:hover, .drop.over { border-color: var(--accent); background: #f1f4f8; }
-  .drop.has { border-style: solid; border-color: var(--ok); background: #f1f7f4; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop.has { border-style: solid; border-color: var(--ok); background: var(--ok-soft); }
   .drop svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 8px; }
   .drop .name { font-weight: 600; word-break: break-all; }
   .drop .desc { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
@@ -59,34 +97,34 @@
 
   .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
   button { font: inherit; font-size: 14px; cursor: pointer; border-radius: 6px; border: 1px solid var(--line2);
-           padding: 9px 20px; background: var(--card); color: var(--ink); transition: .15s; }
+           padding: 9px 20px; background: var(--field); color: var(--ink); transition: .15s; }
   button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button.primary:hover:not(:disabled) { background: var(--accent-d); color: #fff; }
+  button.primary { background: var(--btn); border-color: var(--btn); color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--btn-h); border-color: var(--btn-h); color: #fff; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   .or { color: var(--muted); font-size: 13px; }
 
   .stepper { display: flex; align-items: center; margin: 4px 0 20px; }
   .st { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
   .st i { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal;
-          font-size: 12px; border: 1px solid var(--line2); background: var(--card); }
+          font-size: 12px; border: 1px solid var(--line2); background: var(--field); }
   .st.active { color: var(--ink); font-weight: 600; }
   .st.active i { border: 2px solid var(--accent); color: var(--accent); }
   .st.done { color: var(--ink); }
-  .st.done i { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .st.done i { background: var(--btn); border-color: var(--btn); color: #fff; }
   .st.err i { background: var(--bad); border-color: var(--bad); color: #fff; }
   .line { flex: 1; height: 1px; background: var(--line2); margin: 0 14px; min-width: 14px; }
-  .line.done { background: var(--accent); }
+  .line.done { background: var(--btn); }
 
-  .bar { height: 6px; border-radius: 3px; background: #ebe8e0; overflow: hidden; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  .bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--btn); transition: width .4s; }
   .status-line { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin-top: 10px; }
   .banner { border-radius: 6px; padding: 11px 15px; margin-top: 16px; font-size: 14px; border: 1px solid; }
-  .banner.info { background: #f1f4f8; border-color: #c9d4e2; color: var(--accent); }
-  .banner.err { background: #fbf1ef; border-color: #e5c2bc; color: var(--bad); }
+  .banner.info { background: var(--accent-soft); border-color: var(--line2); color: var(--accent); }
+  .banner.err { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .kpi { padding: 18px 20px; border-right: 1px solid var(--line); background: var(--card); }
+  .kpi { padding: 18px 20px; border-right: 1px solid var(--line); background: var(--soft); }
   .kpi:last-child { border-right: 0; }
   .kpi .v { font: 400 30px/1.15 var(--serif); letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
   .kpi .l { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
@@ -94,14 +132,14 @@
 
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
   .hbar { display: grid; grid-template-columns: 170px 1fr 56px; gap: 12px; align-items: center; margin: 12px 0; font-size: 13.5px; }
-  .hbar .t { height: 8px; border-radius: 4px; background: #ebe8e0; overflow: hidden; }
+  .hbar .t { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
   .hbar .t > div { height: 100%; border-radius: 4px; }
   .hbar .c { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
   .hbar small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 
   .hist { display: flex; align-items: flex-end; gap: 8px; height: 150px; margin-top: 8px; border-bottom: 1px solid var(--line2); }
   .hist div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
-  .hist b { width: 100%; background: var(--accent); min-height: 2px; border-radius: 2px 2px 0 0; opacity: .88; }
+  .hist b { width: 100%; background: var(--bar); min-height: 2px; border-radius: 2px 2px 0 0; opacity: .9; }
   .hist span { position: absolute; bottom: -22px; font-size: 11px; color: var(--muted); }
   .hist-wrap { padding-bottom: 24px; }
 
@@ -116,7 +154,7 @@
   .tab { display: flex; gap: 0; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
   .tab button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 18px 10px; color: var(--muted); }
   .tab button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-  select { font: inherit; font-size: 13.5px; background: var(--card); color: var(--ink); border: 1px solid var(--line2);
+  select { font: inherit; font-size: 13.5px; background: var(--field); color: var(--ink); border: 1px solid var(--line2);
            border-radius: 6px; padding: 5px 10px; }
   .filters { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .tip { cursor: help; border-bottom: 1px dotted var(--muted); }
@@ -133,6 +171,7 @@
     .hero { padding-top: 32px; } .hero h2 { font-size: 27px; }
     .hbar { grid-template-columns: 120px 1fr 50px; }
     .kpi { border-bottom: 1px solid var(--line); }
+    nav { gap: 14px; }
   }
 </style>
 </head>
@@ -151,6 +190,10 @@
       <span class="health"><span class="dot" id="healthDot"></span><span id="healthText">checking</span></span>
       <a href="/docs">API reference</a>
       <a href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline" target="_blank" rel="noopener">Source</a>
+      <button class="theme" id="themeBtn" type="button" aria-label="Switch between light and dark theme" title="Light / dark">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
     </nav>
   </header>
 
@@ -267,8 +310,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const API = "/api/v1";
 
-const NAVY = "#1f3a5f", RED = "#a64b3f";
-const TYPE_COLOR = { SNV: "#1f3a5f", INS: "#3d7a68", DEL: "#a64b3f", MNV: "#b0842f", COMPLEX: "#6c7184" };
+// Colours are CSS variables so the charts follow the light/dark theme.
+const BAR = "var(--bar)", RED = "var(--bad)";
+const TYPE_COLOR = { SNV: "var(--c-snv)", INS: "var(--c-ins)", DEL: "var(--c-del)", MNV: "var(--c-mnv)", COMPLEX: "var(--c-complex)" };
+const tint = (c, pct) => `color-mix(in srgb, ${c} ${pct}%, transparent)`;
 const REASONS = {
   malformed_line: ["Malformed line", "Wrong number of columns, a bad position, or an empty field."],
   non_numeric_qual: ["Bad quality value", "The QUAL column is not a number."],
@@ -281,6 +326,13 @@ const REASONS = {
 
 let vcfFile = null, refFile = null, jobId = null, busy = false;
 let varCursor = null, rejCursor = null;
+
+// ---------- theme ----------
+$("themeBtn").onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
+};
 
 // ---------- health ----------
 async function checkHealth() {
@@ -424,7 +476,7 @@ async function showResults(job) {
 
   const maxT = Math.max(...Object.values(sum.by_type), 1);
   $("types").innerHTML = Object.entries(sum.by_type).sort((a, b) => b[1] - a[1])
-    .map(([t, c]) => hbar(t, c, maxT, TYPE_COLOR[t] || NAVY)).join("") || "<span class='sub'>No variants.</span>";
+    .map(([t, c]) => hbar(t, c, maxT, TYPE_COLOR[t] || BAR)).join("") || "<span class='sub'>No variants.</span>";
 
   const reasons = Object.entries(sum.rejected_by_reason).sort((a, b) => b[1].count - a[1].count);
   const maxR = Math.max(...reasons.map(([, v]) => v.count), 1);
@@ -439,7 +491,7 @@ async function showResults(job) {
 
   const maxC = Math.max(...chr.chromosomes.map((c) => c.variants), 1);
   $("chroms").innerHTML = chr.chromosomes.map((c) =>
-    hbar(esc(c.chrom), c.variants, maxC, NAVY, c.density_per_mb != null ? `${fmt(Math.round(c.density_per_mb))} per Mb` : "")).join("");
+    hbar(esc(c.chrom), c.variants, maxC, BAR, c.density_per_mb != null ? `${fmt(Math.round(c.density_per_mb))} per Mb` : "")).join("");
 
   $("fChrom").innerHTML = '<option value="">all</option>' + chr.chromosomes.map((c) => `<option>${esc(c.chrom)}</option>`).join("");
   await loadVariants(true); await loadRejected(true);
@@ -455,13 +507,13 @@ async function loadVariants(reset) {
   if (varCursor) q.set("cursor", varCursor);
   const page = await api(`/jobs/${jobId}/variants?${q}`);
   $("varBody").insertAdjacentHTML("beforeend", page.items.map((v) => {
-    const c = TYPE_COLOR[v.variant_type] || NAVY;
+    const c = TYPE_COLOR[v.variant_type] || BAR;
     return `
     <tr><td class="m">${esc(v.chrom)}:${fmt(v.pos)}</td>
     <td class="m">${esc(v.ref.length > 14 ? v.ref.slice(0, 14) + "…" : v.ref)} → ${esc(v.alt.length > 14 ? v.alt.slice(0, 14) + "…" : v.alt)}</td>
-    <td><span class="badge" style="background:${c}1a;color:${c}">${esc(v.variant_type)}</span></td>
+    <td><span class="badge" style="background:${tint(c, 16)};color:${c}">${esc(v.variant_type)}</span></td>
     <td>${v.qual ?? "–"}</td><td>${v.af ?? "–"}</td>
-    <td>${v.was_normalized ? '<span class="badge" style="background:#b0842f1f;color:#8a6620">rewritten</span>' : '<span style="color:var(--muted)">as written</span>'}</td></tr>`;
+    <td>${v.was_normalized ? `<span class="badge" style="background:${tint("var(--warn)", 16)};color:var(--warn)">rewritten</span>` : '<span style="color:var(--muted)">as written</span>'}</td></tr>`;
   }).join(""));
   varCursor = page.next_cursor;
   $("btnMore").classList.toggle("hidden", !varCursor);
