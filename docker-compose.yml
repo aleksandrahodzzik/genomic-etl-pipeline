@@ -78,6 +78,19 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  # One-shot: loads the bundled sample dataset so the web UI has results to show on first
+  # open. Idempotent (jobs dedupe by content). Re-run any time: docker compose run --rm seed
+  seed:
+    <<: *app
+    command: ["python", "-m", "variant_etl.demo"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      bucket-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
   api:
     <<: *app
     ports: ["${API_PORT:-8000}:8000"]

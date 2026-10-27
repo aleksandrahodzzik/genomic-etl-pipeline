@@ -61,6 +61,8 @@ If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8
 
 The API also serves a small single-page UI (plain HTML and JavaScript, no build step). Click **Use sample data** or drop your own VCF and FASTA: the browser uploads straight to storage with presigned URLs, shows the job moving through split → process chunks → finalize, then the summary, variant types, reject reasons, allele-frequency histogram, per-chromosome density and a filterable, paginated variant table. It uses only the public REST API described below.
 
+A sample database is pre-loaded: the one-shot `seed` service in `docker-compose.yml` processes the bundled 3,000-record sample when the stack starts, and the page shows that result the first time it is opened (`GET /api/v1/demo` returns the job, or `null` if it was never seeded). Seeding is idempotent, so restarting is harmless; to reload it by hand run `docker compose run --rm seed`.
+
 **Opening it from a phone on the same Wi-Fi.** The browser uploads files straight to MinIO, so the presigned URLs must point at an address the phone can reach, not `localhost`:
 
 ```powershell
@@ -190,7 +192,7 @@ The table is the latest run (`make bench` from a fresh clone). The same benchmar
 ## Testing
 
 ```bash
-make test        # 174 tests; integration tests need `make up` first
+make test        # 175 tests; integration tests need `make up` first
 make lint        # ruff check, ruff format --check, mypy
 ```
 

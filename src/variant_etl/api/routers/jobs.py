@@ -1,21 +1,20 @@
-import hashlib
-import logging
 import re
 import uuid
 from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import delete
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from variant_etl.api.deps import enqueue_dependency, storage_dependency
+from variant_etl.api.service import UPLOAD_PREFIX, SubmitError, submit_job
 from variant_etl.config import get_settings
 from variant_etl.db import queries
 from variant_etl.db.models import Job, JobStatus
 from variant_etl.db.session import get_db
+from variant_etl.demo import find_demo_job
 from variant_etl.schemas.jobs import (
+    DemoOut,
     FailedChunk,
     JobCounts,
     JobCreate,
@@ -26,12 +25,10 @@ from variant_etl.schemas.jobs import (
     UploadRequest,
     UploadResponse,
 )
-from variant_etl.storage.s3 import ObjectNotFound, ObjectStorage
+from variant_etl.storage.s3 import ObjectStorage
 
-log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["jobs"])
 
-UPLOAD_PREFIX = "uploads/"
 DbSession = Annotated[Session, Depends(get_db)]
 Storage = Annotated[ObjectStorage, Depends(storage_dependency)]
 Enqueue = Annotated[Callable[[str], None], Depends(enqueue_dependency)]
@@ -105,59 +102,25 @@ def create_upload(body: UploadRequest, storage: Storage) -> UploadResponse:
 def create_job(
     body: JobCreate, response: Response, session: DbSession, storage: Storage, enqueue: Enqueue
 ) -> JobOut:
-    for key in (body.vcf_key, body.reference_key):
-        if not key.startswith(UPLOAD_PREFIX):
-            raise HTTPException(422, f"key must start with '{UPLOAD_PREFIX}': {key}")
     try:
-        vcf, reference = storage.head(body.vcf_key), storage.head(body.reference_key)
-    except ObjectNotFound as exc:
-        raise HTTPException(422, f"{exc}; upload the file first") from exc
-
-    # Identity of a job is the content of its two inputs. The ETag is the object's MD5 for
-    # single-part uploads, so the same bytes uploaded twice under different keys dedupe.
-    checksum = hashlib.sha256(
-        f"{vcf.etag}:{vcf.size}|{reference.etag}:{reference.size}".encode()
-    ).hexdigest()
-
-    existing = session.query(Job).filter(Job.checksum == checksum).one_or_none()
-    if existing is not None and existing.status != JobStatus.FAILED:
+        job, deduplicated = submit_job(session, storage, enqueue, body.vcf_key, body.reference_key)
+    except SubmitError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    if deduplicated:
         response.status_code = 200
-        return job_out(session, existing, deduplicated=True)
-    if existing is not None:
-        # Re-submitting after a failure means "try again": drop the failed attempt (its
-        # variants cascade) so the checksum is free for a clean run.
-        session.execute(delete(Job).where(Job.id == existing.id))
-        session.commit()
-        storage.delete_prefix(f"chunks/{existing.id}/")
+    return job_out(session, job, deduplicated=deduplicated)
 
-    job = Job(
-        id=uuid.uuid4(),
-        status=JobStatus.QUEUED,
-        vcf_key=body.vcf_key,
-        reference_key=body.reference_key,
-        checksum=checksum,
-    )
-    session.add(job)
-    try:
-        session.commit()
-    except IntegrityError:
-        # A concurrent request with the same inputs won the race on the UNIQUE checksum.
-        session.rollback()
-        winner = session.query(Job).filter(Job.checksum == checksum).one()
-        response.status_code = 200
-        return job_out(session, winner, deduplicated=True)
 
-    try:
-        enqueue(str(job.id))
-    except Exception as exc:
-        # Without a queued task the job would sit in `queued` forever, and its checksum
-        # would block a retry. Remove it and tell the client to try again.
-        log.exception("could not enqueue job %s", job.id)
-        session.execute(delete(Job).where(Job.id == job.id))
-        session.commit()
-        raise HTTPException(503, "task queue unavailable, try again shortly") from exc
-    session.refresh(job)
-    return job_out(session, job)
+@router.get(
+    "/demo",
+    response_model=DemoOut,
+    summary="The pre-loaded sample job",
+    description="Lets the web UI show real results on first open. `job` is null if the "
+    "stack was started without the `seed` service.",
+)
+def get_demo(session: DbSession, storage: Storage) -> DemoOut:
+    job = find_demo_job(session, storage)
+    return DemoOut(job=job_out(session, job) if job is not None else None)
 
 
 def _require_job(session: Session, job_id: uuid.UUID) -> Job:

@@ -460,7 +460,7 @@ function hbar(label, count, max, color, note) {
   return `<div class="hbar"><div>${label}${note ? `<small>${note}</small>` : ""}</div><div class="t"><div style="width:${w}%;background:${color}"></div></div><div class="c">${fmt(count)}</div></div>`;
 }
 
-async function showResults(job) {
+async function showResults(job, scroll = true) {
   const base = "/jobs/" + job.id;
   const [sum, chr, af] = await Promise.all([api(base + "/stats/summary"), api(base + "/stats/chromosomes"), api(base + "/stats/af-histogram?bins=10")]);
   $("results").classList.remove("hidden");
@@ -495,7 +495,32 @@ async function showResults(job) {
 
   $("fChrom").innerHTML = '<option value="">all</option>' + chr.chromosomes.map((c) => `<option>${esc(c.chrom)}</option>`).join("");
   await loadVariants(true); await loadRejected(true);
-  $("results").scrollIntoView({ behavior: "smooth" });
+  if (scroll) $("results").scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- pre-loaded sample dataset ----------
+// The `seed` compose service processes the bundled sample once at startup, so first-time
+// visitors see real results immediately instead of an empty page.
+async function loadDemo() {
+  try {
+    let { job } = await api("/demo");
+    if (!job || job.status === "failed") return;
+    jobId = job.id;
+    busy = true; refreshRun();
+    if (job.status !== "completed") {
+      // Seeding is still in flight (stack just started): show progress like a normal run.
+      $("progressCard").classList.remove("hidden");
+      $("jobLine").innerHTML = `Job <span class="mono">${esc(job.id)}</span>`;
+      job = await poll(job.id);
+    }
+    if (job.status === "completed") {
+      banner("info", "Showing the pre-loaded sample dataset. Drop your own VCF and FASTA above to process them.");
+      await showResults(job, false);
+    }
+  } catch (e) {
+    // The demo is a convenience; a failure here must not get in the way of normal use.
+    console.warn("sample dataset unavailable:", e);
+  } finally { busy = false; refreshRun(); }
 }
 
 // ---------- variants table ----------
@@ -540,6 +565,7 @@ $("btnMoreRej").onclick = () => loadRejected(false);
 $("tabVar").onclick = () => { $("tabVar").classList.add("on"); $("tabRej").classList.remove("on"); $("paneVar").classList.remove("hidden"); $("paneRej").classList.add("hidden"); };
 $("tabRej").onclick = () => { $("tabRej").classList.add("on"); $("tabVar").classList.remove("on"); $("paneRej").classList.remove("hidden"); $("paneVar").classList.add("hidden"); };
 refreshRun();
+loadDemo();
 </script>
 </body>
 </html>

@@ -124,3 +124,9 @@ class RejectedPage(BaseModel):
     items: list[RejectedRecordOut]
     next_after_line: int | None = Field(description="Pass as `after_line` to get the next page.")
     note: str = "Only a bounded sample of rejected lines is stored; reason counts are exact."
+
+
+class DemoOut(BaseModel):
+    job: JobOut | None = Field(
+        description="The pre-loaded sample job, or null if the stack was started without seeding."
+    )
