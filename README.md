@@ -53,7 +53,7 @@ make up      # postgres, redis, minio, migrations, api, worker; returns when eve
 make demo    # generates 200k records, uploads them, runs a job, prints the stats
 ```
 
-Then open the web UI at <http://localhost:8000/> (the interactive API docs are at <http://localhost:8000/docs>). Scale out with `docker compose up -d --scale worker=4`. Tear down with `make down` (this also deletes the volumes).
+Then open the web UI at <http://localhost:8010/> (the interactive API docs are at <http://localhost:8010/docs>). Scale out with `docker compose up -d --scale worker=4`. Tear down with `make down` (this also deletes the volumes).
 
 If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8010 POSTGRES_PORT=5433 make up`, then use `http://localhost:8010/`. (`make demo`, the benchmark and the tests default to the standard ports: pass `--api`, or set `API_URL` and `DATABASE_URL`, to follow the change.)
 
