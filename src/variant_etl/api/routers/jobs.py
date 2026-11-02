@@ -1,6 +1,7 @@
 import re
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -12,7 +13,7 @@ from variant_etl.config import get_settings
 from variant_etl.db import queries
 from variant_etl.db.models import Job, JobStatus
 from variant_etl.db.session import get_db
-from variant_etl.demo import find_demo_job
+from variant_etl.demo import find_demo_job, submit_synthetic
 from variant_etl.schemas.jobs import (
     DemoOut,
     FailedChunk,
@@ -103,7 +104,14 @@ def create_job(
     body: JobCreate, response: Response, session: DbSession, storage: Storage, enqueue: Enqueue
 ) -> JobOut:
     try:
-        job, deduplicated = submit_job(session, storage, enqueue, body.vcf_key, body.reference_key)
+        job, deduplicated = submit_job(
+            session,
+            storage,
+            enqueue,
+            body.vcf_key,
+            body.reference_key,
+            max_active=get_settings().max_active_jobs,
+        )
     except SubmitError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     if deduplicated:
@@ -114,13 +122,45 @@ def create_job(
 @router.get(
     "/demo",
     response_model=DemoOut,
-    summary="The pre-loaded sample job",
+    summary="The pre-loaded sample job and this deployment's demo limits",
     description="Lets the web UI show real results on first open. `job` is null if the "
     "stack was started without the `seed` service.",
 )
 def get_demo(session: DbSession, storage: Storage) -> DemoOut:
+    settings = get_settings()
     job = find_demo_job(session, storage)
-    return DemoOut(job=job_out(session, job) if job is not None else None)
+    return DemoOut(
+        job=job_out(session, job) if job is not None else None,
+        synthetic=bool(settings.demo_synthetic_dir),
+        max_upload_mb=settings.demo_max_upload_mb or None,
+        notice=settings.demo_notice or None,
+        chunk_size=settings.chunk_size,
+    )
+
+
+@router.post(
+    "/demo/synthetic",
+    response_model=JobOut,
+    status_code=202,
+    summary="Process the bundled synthetic dataset (public demo only)",
+    description="Uploads a fresh copy of the synthetic records the demo image was built with "
+    "and starts a job for it. 404 unless DEMO_SYNTHETIC_DIR is set.",
+)
+def create_synthetic_job(session: DbSession, storage: Storage, enqueue: Enqueue) -> JobOut:
+    settings = get_settings()
+    if not settings.demo_synthetic_dir:
+        raise HTTPException(404, "not available on this deployment")
+    try:
+        job = submit_synthetic(
+            session,
+            storage,
+            enqueue,
+            Path(settings.demo_synthetic_dir),
+            settings.max_active_jobs,
+        )
+    except SubmitError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    return job_out(session, job)
 
 
 def _require_job(session: Session, job_id: uuid.UUID) -> Job:

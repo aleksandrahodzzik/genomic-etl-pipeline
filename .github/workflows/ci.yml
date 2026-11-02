@@ -61,6 +61,34 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # The public demo's single-container image: built and checked end to end through its one
+  # port on every push, so the Hugging Face Space cannot break silently.
+  space-image:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.space
+          load: true
+          push: false
+          tags: variant-etl-space:ci
+      - name: Start the demo container
+        run: docker run -d --name space -p 7860:7860 variant-etl-space:ci
+      - name: Smoke test through the single port
+        run: uv run python scripts/space_smoke.py --timeout 300
+      - name: Container logs
+        if: always()
+        run: docker logs space 2>&1 | tail -n 200
+
   docker-build:
     needs: integration
     runs-on: ubuntu-latest

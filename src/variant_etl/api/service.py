@@ -42,19 +42,38 @@ def content_checksum(storage: ObjectStorage, vcf_key: str, reference_key: str) -
     ).hexdigest()
 
 
+def ensure_capacity(session: Session, max_active: int) -> None:
+    """Admission limit for the public demo: refuse a new job while `max_active` jobs are
+    queued or running. 0 means no limit. A soft limit: two requests racing can both pass."""
+    if max_active <= 0:
+        return
+    active = (
+        session.query(Job).filter(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])).count()
+    )
+    if active >= max_active:
+        raise SubmitError(
+            429,
+            f"This demo processes at most {max_active} jobs at a time and is busy right now; "
+            "try again in a minute.",
+        )
+
+
 def submit_job(
     session: Session,
     storage: ObjectStorage,
     enqueue: Callable[[str], None],
     vcf_key: str,
     reference_key: str,
+    max_active: int = 0,
 ) -> tuple[Job, bool]:
-    """Return (job, deduplicated). Raises SubmitError for bad input or an unavailable queue."""
+    """Return (job, deduplicated). Raises SubmitError for bad input, a full demo
+    (`max_active`) or an unavailable queue."""
     checksum = content_checksum(storage, vcf_key, reference_key)
 
     existing = session.query(Job).filter(Job.checksum == checksum).one_or_none()
     if existing is not None and existing.status != JobStatus.FAILED:
         return existing, True
+    ensure_capacity(session, max_active)
     if existing is not None:
         # Re-submitting after a failure means "try again": drop the failed attempt (its
         # variants cascade) so the checksum is free for a clean run.

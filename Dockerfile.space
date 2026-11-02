@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1
+
+# The public demo image: PostgreSQL, Redis, MinIO, the API, two Celery workers and a reverse
+# proxy in ONE container behind ONE port, for a Hugging Face Space (Docker SDK, free CPU).
+# Local use stays on docker-compose.yml; this trades the scaled-out topology for a single
+# process tree. What runs, and in which order: space/supervisord.conf and space/bootstrap.sh.
+#
+#   docker build -f Dockerfile.space -t variant-etl-space .
+#   docker run --rm -p 7860:7860 variant-etl-space        # then open http://localhost:7860
+
+# MinIO's community edition no longer publishes images; take the binary from the fork that
+# docker-compose.yml already pins.
+FROM pgsty/minio:RELEASE.2026-08-04T00-00-00Z AS minio
+
+# ---- build stage: the same dependency install as Dockerfile ----------------------------
+FROM python:3.12-slim AS builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN pip install --no-cache-dir uv==0.13.5
+
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY src ./src
+RUN uv sync --frozen --no-dev --no-editable
+
+# The dataset behind the "Run 100k synthetic records" button, generated once at build time:
+# 100,000 records on 3 contigs of 1 Mb, 0.5% deliberately invalid.
+COPY scripts/generate_data.py /tmp/generate_data.py
+RUN python /tmp/generate_data.py --contigs 3 --contig-length 1000000 --variants 100000 \
+        --titv 2.0 --error-rate 0.005 --seed 7 --out-dir /opt/synthetic \
+    && rm -f /opt/synthetic/truth.json /opt/synthetic/*.fai
+
+# ---- runtime ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql redis-server nginx supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=minio /usr/bin/minio /usr/local/bin/minio
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/synthetic /app/synthetic
+
+# Hugging Face runs Space containers as uid 1000; nothing here needs root.
+RUN useradd --create-home --uid 1000 user
+
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/home/user
+
+WORKDIR /app
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY space/start.sh space/bootstrap.sh space/supervisord.conf space/nginx.conf ./space/
+
+USER user
+EXPOSE 7860
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=4 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=4)"
+
+CMD ["bash", "/app/space/start.sh"]

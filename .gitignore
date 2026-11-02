@@ -22,3 +22,6 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# GitHub Pages build output (`make pages`)
+/site/

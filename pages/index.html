@@ -1,0 +1,282 @@
+<!doctype html>
+<!--
+  Variant ETL · the project's GitHub Pages site.
+
+  Built by scripts/export_pages.py, which copies this folder next to data/snapshot.json: the API's
+  answers for a real run of the bundled sample, saved by CI. site.js renders every number on the
+  page from that file; motion.js only adds scroll motion, and the page reads the same without it.
+
+  Design adapted from the Reflow template by 8B (https://8b.com/templates/reflow/): its layers,
+  type scale, dark/paper alternation, dot-matrix wordmark and scroll scenes. MIT License,
+  Copyright (c) 2026 8B; the full notice is in LICENSE-reflow.txt next to this file.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variant ETL</title>
+<meta name="description" content="A genomic variant ETL pipeline: validates VCF records against the reference genome, normalizes them like bcftools norm and bulk-loads them into PostgreSQL with parallel workers. Results of a real run.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Variant ETL">
+<meta property="og:description" content="Raw VCF files in, clean queryable variants out, checked line by line.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'14'%20fill%3D'%232b46ff'%2F%3E%3Cpath%20d%3D'M20%2012c0%2016%2024%2016%2024%2032s-24%2016-24%208M44%2012c0%2016-24%2016-24%2032s24%2016%2024%208'%20fill%3D'none'%20stroke%3D'%23f3f5f6'%20stroke-width%3D'5'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip m-text-3" href="#main">Skip to content</a>
+<header id="navigation">
+  <div class="nav__bar">
+    <a class="nav__brand" href="#opening"><span class="nav__mark" aria-hidden="true"><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span></span>Variant ETL</a>
+    <p class="nav__hours m-text-3"><span class="nav__live" aria-hidden="true"></span>Snapshot of a real run</p>
+    <nav class="nav__links-wrap" aria-label="Main">
+      <ul class="nav__links">
+        <li><a class="m-link" href="#pipeline">Pipeline</a></li>
+        <li><a class="m-link" href="#results">Results</a></li>
+        <li><a class="m-link" href="#scaling">Scaling</a></li>
+        <li><a class="m-link" href="#run">Run it</a></li>
+      </ul>
+    </nav>
+    <div class="nav__end">
+      <a class="m-btn" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline"><span class="m-btn__label">Source</span></a>
+      <button class="nav__toggle m-icon-btn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="nav-menu"><span class="m-icon-btn__bar"></span><span class="m-icon-btn__bar"></span></button>
+    </div>
+  </div>
+  <div class="nav__menu m-surface" id="nav-menu" data-lenis-prevent hidden>
+    <button class="nav__menu-close m-icon-btn" type="button" aria-label="Close menu"><span class="m-icon-btn__bar"></span><span class="m-icon-btn__bar"></span></button>
+    <nav aria-label="Menu">
+      <ul class="nav__menu-links m-text-4">
+        <li><a href="#pipeline">Pipeline</a></li>
+        <li><a href="#results">Sample run</a></li>
+        <li><a href="#scaling">Scaling</a></li>
+        <li><a href="#claims">How it is checked</a></li>
+        <li><a href="#run">Run it</a></li>
+      </ul>
+    </nav>
+    <div class="nav__menu-meta m-text-3">
+      <p>Python 3.12 · FastAPI · Celery · PostgreSQL 16 · S3</p>
+      <p><a class="m-link" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline">Source on GitHub</a></p>
+      <p>MIT licensed</p>
+    </div>
+  </div>
+</header>
+<main id="main">
+<section id="opening">
+  <div class="op-stage m-surface">
+    <div class="op-wm" aria-hidden="true"><span class="op-wm__half"><span class="op-wm__letter" style="--l:0"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:2/span 1"></i><i style="grid-column:4/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:3/span 1"></i></span></span><span class="op-wm__letter" style="--l:1"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:2/span 3"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span></span><span class="op-wm__letter" style="--l:2"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 4"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 4"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i><i style="grid-column:4/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span></span><span class="op-wm__letter" style="--l:3"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 5"></i></span></span><span class="op-wm__letter" style="--l:4"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:2/span 3"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span></span><span class="op-wm__letter" style="--l:5"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 2"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i><i style="grid-column:3/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 1"></i><i style="grid-column:3/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i><i style="grid-column:4/span 2"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 1"></i><i style="grid-column:5/span 1"></i></span></span><span class="op-wm__letter" style="--l:6"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:3/span 1"></i></span></span></span><span class="op-wm__half"><span class="op-wm__letter" style="--l:7"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 4"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 5"></i></span></span><span class="op-wm__letter" style="--l:8"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 5"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:3/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:3/span 1"></i></span></span><span class="op-wm__letter" style="--l:9"><span class="op-wm__row" data-r="0" style="--r:0"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="1" style="--r:1"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="2" style="--r:2"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="3" style="--r:3"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="4" style="--r:4"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="5" style="--r:5"><i style="grid-column:1/span 1"></i></span><span class="op-wm__row" data-r="6" style="--r:6"><i style="grid-column:1/span 5"></i></span></span></span></div>
+    <div class="op-copy">
+      <h1 class="op-title m-text-4"><span class="sr-only">Variant ETL: </span>Raw VCF files in, clean queryable variants out, <em class="m-serif">checked line by line.</em></h1>
+      <p class="op-lead m-text">Every record is validated against the reference genome, rewritten into the form <code>bcftools&nbsp;norm</code> produces and bulk-loaded into PostgreSQL by parallel workers.</p>
+      <div class="op-actions">
+        <a class="m-btn" href="#results"><span class="m-btn__label">See a real run</span></a>
+        <a class="m-link" href="#run">Run it yourself</a>
+      </div>
+    </div>
+    <svg class="op-trace" viewBox="0 0 1000 32" preserveAspectRatio="none" aria-hidden="true"><path class="tr-base" pathLength="1000" d="M0.0 16.0 L8.0 11.9 L16.0 11.9 L24.0 16.7 L32.0 22.2 L40.0 24.2 L48.0 22.0 L56.0 18.2 L64.0 15.3 L72.0 13.2 L80.0 10.7 L88.0 8.1 L96.0 8.1 L104.0 12.5 L112.0 19.1 L120.0 23.3 L128.0 21.8 L136.0 16.7 L144.0 13.2 L152.0 14.7 L160.0 19.6 L168.0 22.7 L176.0 20.9 L184.0 15.5 L192.0 10.6 L200.0 9.0 L208.0 9.9 L216.0 11.3 L224.0 12.8 L232.0 15.7 L240.0 20.5 L248.0 24.7 L256.0 24.6 L264.0 19.6 L272.0 13.3 L280.0 10.9 L288.0 13.8 L296.0 18.4 L304.0 19.5 L312.0 15.6 L320.0 10.2 L328.0 7.9 L336.0 10.4 L344.0 15.1 L352.0 18.8 L360.0 20.5 L368.0 21.7 L376.0 23.0 L384.0 22.5 L392.0 18.6 L400.0 12.3 L408.0 7.8 L416.0 8.7 L424.0 14.0 L432.0 18.7 L440.0 18.6 L448.0 14.3 L456.0 10.7 L464.0 11.7 L472.0 17.0 L480.0 22.2 L488.0 23.8 L496.0 22.0 L504.0 19.2 L512.0 17.0 L520.0 14.5 L528.0 10.9 L536.0 7.5 L544.0 7.6 L552.0 12.4 L560.0 19.1 L568.0 22.5 L576.0 20.3 L584.0 15.4 L592.0 13.0 L600.0 15.6 L608.0 20.8 L616.0 23.4 L624.0 21.1 L632.0 15.8 L640.0 11.5 L648.0 10.0 L656.0 10.1 L664.0 10.3 L672.0 11.3 L680.0 14.7 L688.0 20.3 L696.0 24.8 L704.0 24.3 L712.0 18.9 L720.0 13.2 L728.0 11.9 L736.0 15.5 L744.0 19.7 L752.0 19.7 L760.0 15.0 L768.0 9.7 L776.0 7.9 L784.0 10.4 L792.0 14.3 L800.0 17.3 L808.0 19.3 L816.0 21.6 L824.0 23.8 L832.0 23.5 L840.0 19.1 L848.0 12.4 L856.0 8.3 L864.0 9.8 L872.0 15.1 L880.0 18.8 L888.0 17.5 L896.0 12.8 L904.0 9.7 L912.0 11.5 L920.0 17.0 L928.0 21.8 L936.0 23.2 L944.0 21.9 L952.0 20.2 L960.0 18.6 L968.0 15.7 L976.0 11.1 L984.0 7.1 L992.0 7.4 L1000.0 12.7"/><path class="tr-tail" pathLength="1000" d="M0.0 16.0 L8.0 11.9 L16.0 11.9 L24.0 16.7 L32.0 22.2 L40.0 24.2 L48.0 22.0 L56.0 18.2 L64.0 15.3 L72.0 13.2 L80.0 10.7 L88.0 8.1 L96.0 8.1 L104.0 12.5 L112.0 19.1 L120.0 23.3 L128.0 21.8 L136.0 16.7 L144.0 13.2 L152.0 14.7 L160.0 19.6 L168.0 22.7 L176.0 20.9 L184.0 15.5 L192.0 10.6 L200.0 9.0 L208.0 9.9 L216.0 11.3 L224.0 12.8 L232.0 15.7 L240.0 20.5 L248.0 24.7 L256.0 24.6 L264.0 19.6 L272.0 13.3 L280.0 10.9 L288.0 13.8 L296.0 18.4 L304.0 19.5 L312.0 15.6 L320.0 10.2 L328.0 7.9 L336.0 10.4 L344.0 15.1 L352.0 18.8 L360.0 20.5 L368.0 21.7 L376.0 23.0 L384.0 22.5 L392.0 18.6 L400.0 12.3 L408.0 7.8 L416.0 8.7 L424.0 14.0 L432.0 18.7 L440.0 18.6 L448.0 14.3 L456.0 10.7 L464.0 11.7 L472.0 17.0 L480.0 22.2 L488.0 23.8 L496.0 22.0 L504.0 19.2 L512.0 17.0 L520.0 14.5 L528.0 10.9 L536.0 7.5 L544.0 7.6 L552.0 12.4 L560.0 19.1 L568.0 22.5 L576.0 20.3 L584.0 15.4 L592.0 13.0 L600.0 15.6 L608.0 20.8 L616.0 23.4 L624.0 21.1 L632.0 15.8 L640.0 11.5 L648.0 10.0 L656.0 10.1 L664.0 10.3 L672.0 11.3 L680.0 14.7 L688.0 20.3 L696.0 24.8 L704.0 24.3 L712.0 18.9 L720.0 13.2 L728.0 11.9 L736.0 15.5 L744.0 19.7 L752.0 19.7 L760.0 15.0 L768.0 9.7 L776.0 7.9 L784.0 10.4 L792.0 14.3 L800.0 17.3 L808.0 19.3 L816.0 21.6 L824.0 23.8 L832.0 23.5 L840.0 19.1 L848.0 12.4 L856.0 8.3 L864.0 9.8 L872.0 15.1 L880.0 18.8 L888.0 17.5 L896.0 12.8 L904.0 9.7 L912.0 11.5 L920.0 17.0 L928.0 21.8 L936.0 23.2 L944.0 21.9 L952.0 20.2 L960.0 18.6 L968.0 15.7 L976.0 11.1 L984.0 7.1 L992.0 7.4 L1000.0 12.7"/><path class="tr-head" pathLength="1000" d="M0.0 16.0 L8.0 11.9 L16.0 11.9 L24.0 16.7 L32.0 22.2 L40.0 24.2 L48.0 22.0 L56.0 18.2 L64.0 15.3 L72.0 13.2 L80.0 10.7 L88.0 8.1 L96.0 8.1 L104.0 12.5 L112.0 19.1 L120.0 23.3 L128.0 21.8 L136.0 16.7 L144.0 13.2 L152.0 14.7 L160.0 19.6 L168.0 22.7 L176.0 20.9 L184.0 15.5 L192.0 10.6 L200.0 9.0 L208.0 9.9 L216.0 11.3 L224.0 12.8 L232.0 15.7 L240.0 20.5 L248.0 24.7 L256.0 24.6 L264.0 19.6 L272.0 13.3 L280.0 10.9 L288.0 13.8 L296.0 18.4 L304.0 19.5 L312.0 15.6 L320.0 10.2 L328.0 7.9 L336.0 10.4 L344.0 15.1 L352.0 18.8 L360.0 20.5 L368.0 21.7 L376.0 23.0 L384.0 22.5 L392.0 18.6 L400.0 12.3 L408.0 7.8 L416.0 8.7 L424.0 14.0 L432.0 18.7 L440.0 18.6 L448.0 14.3 L456.0 10.7 L464.0 11.7 L472.0 17.0 L480.0 22.2 L488.0 23.8 L496.0 22.0 L504.0 19.2 L512.0 17.0 L520.0 14.5 L528.0 10.9 L536.0 7.5 L544.0 7.6 L552.0 12.4 L560.0 19.1 L568.0 22.5 L576.0 20.3 L584.0 15.4 L592.0 13.0 L600.0 15.6 L608.0 20.8 L616.0 23.4 L624.0 21.1 L632.0 15.8 L640.0 11.5 L648.0 10.0 L656.0 10.1 L664.0 10.3 L672.0 11.3 L680.0 14.7 L688.0 20.3 L696.0 24.8 L704.0 24.3 L712.0 18.9 L720.0 13.2 L728.0 11.9 L736.0 15.5 L744.0 19.7 L752.0 19.7 L760.0 15.0 L768.0 9.7 L776.0 7.9 L784.0 10.4 L792.0 14.3 L800.0 17.3 L808.0 19.3 L816.0 21.6 L824.0 23.8 L832.0 23.5 L840.0 19.1 L848.0 12.4 L856.0 8.3 L864.0 9.8 L872.0 15.1 L880.0 18.8 L888.0 17.5 L896.0 12.8 L904.0 9.7 L912.0 11.5 L920.0 17.0 L928.0 21.8 L936.0 23.2 L944.0 21.9 L952.0 20.2 L960.0 18.6 L968.0 15.7 L976.0 11.1 L984.0 7.1 L992.0 7.4 L1000.0 12.7"/></svg>
+    <ul class="op-bar m-text-3">
+      <li>FastAPI · Celery · PostgreSQL · S3</li>
+      <li>Same rows as bcftools norm</li>
+      <li>1 → 4 workers: 1.8× throughput</li>
+      <li>MIT licensed</li>
+    </ul>
+    <div class="op-flood" aria-hidden="true"></div>
+  </div>
+  <div class="op-second m-surface-2">
+    <p class="m-spread" data-motion="spread">Malformed, misaligned, multi-allelic or out of range</p>
+    <div class="op-stair">
+      <h2 class="op-stair__title m-text-2"><span class="op-stair__word w1">Most</span> <span class="op-stair__word w2">raw</span> <span class="op-stair__word w3">files</span> <span class="op-stair__word w4">need</span> <span class="op-stair__word w5"><span class="m-select m-serif">cleaning.</span></span></h2>
+      <div class="op-tiles">
+        <figure class="op-tile t1 tl tl--dark">
+          <figcaption class="tl__k m-text-3">Left-align · Tan et al. 2015</figcaption>
+          <p class="tl__seq" aria-label="Reference G C A C A C A G, positions 1 to 8">G<b>CACACA</b>G</p>
+          <dl class="tl__rows">
+            <div><dt class="m-text-3">written</dt><dd>pos 5 · ACA → A</dd></div>
+            <div><dt class="m-text-3">stored</dt><dd class="tl__ok">pos 1 · GCA → G</dd></div>
+          </dl>
+        </figure>
+        <figure class="op-tile t2 tl tl--dark">
+          <figcaption class="tl__k m-text-3">4 chunks · 2 workers</figcaption>
+          <ol class="tl__chunks" aria-label="Four chunks processed by two workers">
+            <li><span>01</span><i style="--p:1"></i><span>w1</span></li>
+            <li><span>02</span><i style="--p:1"></i><span>w2</span></li>
+            <li><span>03</span><i style="--p:.62"></i><span>w1</span></li>
+            <li><span>04</span><i style="--p:.35"></i><span>w2</span></li>
+          </ol>
+        </figure>
+        <figure class="op-tile t3 tl tl--blue">
+          <figcaption class="tl__k m-text-3">Ti/Tv of the sample run</figcaption>
+          <p class="tl__big" data-bind="titv">–</p>
+          <p class="tl__sub m-text-3">About 2.0 is typical for human genomes</p>
+        </figure>
+      </div>
+    </div>
+    <div class="op-note">
+      <p class="op-note__text m-text">The same deletion can be written several ways, and a QUAL of <code>inf</code>, a chromosome the reference lacks or a REF that disagrees with the genome all turn up in real files. The pipeline refuses such lines with a reason, rewrites the rest into one standard form and loads them so a region query takes milliseconds. Every number below comes from a real run of the bundled sample. <a class="m-link" href="#pipeline">How a line is checked</a></p>
+    </div>
+  </div>
+</section>
+
+<section id="pipeline" class="m-surface">
+  <div class="dg-inner">
+    <p class="m-spread" data-motion="spread">Every refused line keeps its reason</p>
+    <div class="dg-grid">
+      <div class="dg-head">
+        <h2 class="dg-title m-text-2"><span class="dg-w">Every</span> <span class="dg-w">line,</span> <span class="dg-w">checked,</span> <span class="dg-w m-serif">on record.</span></h2>
+        <p class="dg-lead m-text">Seven checks run in a fixed order, so each refused line gets exactly one reason. Lines that pass are split, trimmed and left-aligned, then loaded with <code>COPY</code>, one transaction per chunk. The board is the bundled sample's run.</p>
+      </div>
+      <div class="dg-board">
+        <p class="dg-board__head m-text-3"><span>Check · <span data-bind="records">–</span> lines</span><span>Result</span></p>
+        <div class="dg-listwrap">
+          <div class="dg-band" aria-hidden="true"></div>
+          <ol class="dg-list">
+            <li class="dg-row m-text-5" data-check="malformed_line"><span class="dg-name">Columns, position and alleles present</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="non_numeric_qual"><span class="dg-name">QUAL is a number</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="unknown_contig"><span class="dg-name">Chromosome is in the reference</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="pos_out_of_bounds"><span class="dg-name">Position is inside the chromosome</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="unsupported_symbolic"><span class="dg-name">No symbolic alleles</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="invalid_allele_chars"><span class="dg-name">Only A, C, G, T and N</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="ref_mismatch"><span class="dg-name">REF matches the genome</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="split"><span class="dg-name">Split multi-allelic lines</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="normalize"><span class="dg-name">Trim and left-align</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+            <li class="dg-row m-text-5" data-check="load"><span class="dg-name">Load with COPY</span><span class="dg-state"><span class="dg-pending" aria-hidden="true">Queued</span><span class="dg-result"><span class="m-dash" aria-hidden="true"></span><span class="dg-val">–</span></span></span></li>
+          </ol>
+        </div>
+        <p class="dg-sum m-text" id="boardSum">Loading the run…</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="results" class="m-surface-2">
+  <p class="m-spread" data-motion="spread">Read back from the API after the run</p>
+  <div class="pr-head l-grid">
+    <h2 class="pr-title m-text-2">Sample <span class="m-serif">run</span></h2>
+    <p class="pr-note m-text">A snapshot, not a live server: CI starts the whole stack, processes the bundled sample and saves the API's answers into this page. <span id="snapNote"></span></p>
+  </div>
+  <div class="rs-kpis" id="kpis"></div>
+  <div class="rs-panels">
+    <section class="rs-panel" aria-labelledby="h-types"><h3 class="m-text-3" id="h-types">Variant types</h3><div id="types"></div></section>
+    <section class="rs-panel" aria-labelledby="h-af"><h3 class="m-text-3" id="h-af">Allele frequency</h3><div class="rs-hist" id="af"></div></section>
+    <section class="rs-panel" aria-labelledby="h-chroms"><h3 class="m-text-3" id="h-chroms">Per chromosome</h3><div id="chroms"></div></section>
+  </div>
+  <div class="rs-explorer">
+    <div class="rs-tabs m-text-3" role="tablist">
+      <button id="tabVar" type="button" role="tab" aria-selected="true" aria-controls="paneVar">Variants</button>
+      <button id="tabRej" type="button" role="tab" aria-selected="false" aria-controls="paneRej">Refused lines</button>
+    </div>
+    <div id="paneVar" role="tabpanel" aria-labelledby="tabVar">
+      <div class="rs-filters">
+        <label class="m-field"><span class="m-field__label">Chromosome</span><select class="m-field__control" id="fChrom"><option value="">All</option></select></label>
+        <label class="m-field"><span class="m-field__label">Type</span><select class="m-field__control" id="fType"><option value="">All</option></select></label>
+        <label class="m-field"><span class="m-field__label">Region from</span><input class="m-field__control" id="fStart" type="number" min="1" step="1" inputmode="numeric" placeholder="1"></label>
+        <label class="m-field"><span class="m-field__label">to</span><input class="m-field__control" id="fEnd" type="number" min="1" step="1" inputmode="numeric" placeholder="end"></label>
+        <p class="rs-count m-text-3" id="varCount" role="status"></p>
+      </div>
+      <div class="rs-tablewrap"><table class="rs-table">
+        <thead class="m-text-3"><tr><th scope="col">Position</th><th scope="col">Change</th><th scope="col">Type</th><th scope="col">Quality</th><th scope="col">Freq.</th><th scope="col">Form</th></tr></thead>
+        <tbody id="varBody"></tbody>
+      </table></div>
+      <div class="rs-more"><button class="m-btn-2" id="btnMore" type="button" hidden><span class="m-btn__label">Load 25 more</span></button></div>
+    </div>
+    <div id="paneRej" role="tabpanel" aria-labelledby="tabRej" hidden>
+      <p class="rs-count m-text-3" id="rejNote"></p>
+      <div class="rs-tablewrap"><table class="rs-table">
+        <thead class="m-text-3"><tr><th scope="col">Line</th><th scope="col">Reason</th><th scope="col">Raw text</th></tr></thead>
+        <tbody id="rejBody"></tbody>
+      </table></div>
+      <div class="rs-more"><button class="m-btn-2" id="btnMoreRej" type="button" hidden><span class="m-btn__label">Load 25 more</span></button></div>
+    </div>
+  </div>
+</section>
+
+<section id="scaling" class="m-surface">
+  <p class="m-spread" data-motion="spread">Chunks are independent, so workers add up</p>
+  <h2 class="bn-title m-text-2"><span class="bn-w bn-w1">Add</span> <span class="bn-w bn-w2">workers,</span> <span class="bn-w bn-w3 m-serif">go faster.</span></h2>
+  <div class="sc-board">
+    <p class="sc-axis m-text-3"><span>Records per second, one laptop</span><span>60,000</span></p>
+    <ol class="sc-rows">
+      <li class="sc-row"><p class="sc-label"><span class="m-text-5">ClinVar GRCh38</span><span class="m-text-3">1,094,545 real records · 1 worker</span></p><p class="sc-track"><span class="sc-bar" style="--v:27758"></span><span class="sc-val m-text-5">27,758</span></p></li>
+      <li class="sc-row"><p class="sc-label"><span class="m-text-5">ClinVar GRCh38</span><span class="m-text-3">same records · 4 workers</span></p><p class="sc-track"><span class="sc-bar is-hot" style="--v:49565"></span><span class="sc-val m-text-5">49,565</span></p></li>
+      <li class="sc-row"><p class="sc-label"><span class="m-text-5">Synthetic</span><span class="m-text-3">1,000,000 records · 1 worker</span></p><p class="sc-track"><span class="sc-bar" style="--v:30567"></span><span class="sc-val m-text-5">30,567</span></p></li>
+      <li class="sc-row"><p class="sc-label"><span class="m-text-5">Synthetic</span><span class="m-text-3">same records · 4 workers</span></p><p class="sc-track"><span class="sc-bar is-hot" style="--v:57241"></span><span class="sc-val m-text-5">57,241</span></p></li>
+    </ol>
+  </div>
+  <div class="bn-cols l-grid">
+    <p class="m-text">1 → 4 worker containers: 1.79× on ClinVar, 1.87× on synthetic records, on one laptop that also runs PostgreSQL, Redis and MinIO. <a class="m-link" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline/blob/main/docs/BENCHMARKS_CLINVAR.md">Method and raw numbers</a></p>
+    <p class="m-text">A 10 kb region query on ClinVar takes 1.6 ms (median) with the <code>(job_id, chrom, pos)</code> index and 64 ms without it.</p>
+    <p class="m-text">A chunk that crashes after <code>COPY</code> but before <code>COMMIT</code> leaves nothing behind, and its retry loads every row exactly once.</p>
+  </div>
+</section>
+
+<section id="claims" class="m-surface-2">
+  <p class="m-spread" data-motion="spread">Each claim has a test behind it</p>
+  <div class="pt-head l-grid">
+    <h2 class="pt-title m-text-4">Three claims, and how each one is checked.</h2>
+  </div>
+  <table class="pt-sheet">
+    <caption class="sr-only">The project's three main claims, how each is tested and the result on real data</caption>
+    <thead>
+      <tr><td></td><th scope="col" class="m-text-4">Normalization</th><th scope="col" class="m-text-4">Retries</th><th scope="col" class="m-text-4">Scale-out</th></tr>
+    </thead>
+    <tbody class="m-text-5" data-motion="dash">
+      <tr><th scope="row" class="m-text-3"><span class="m-dash" aria-hidden="true"></span>Claim</th><td>Same rows as <code>bcftools norm -m -any -f</code></td><td>No duplicate rows after a crash or a redelivered task</td><td>N workers process N chunks at once</td></tr>
+      <tr><th scope="row" class="m-text-3"><span class="m-dash" aria-hidden="true"></span>Checked by</th><td>An oracle test, record by record, on every push</td><td>An integration test that crashes a chunk between COPY and COMMIT</td><td><code>make bench</code> and <code>make bench-clinvar</code></td></tr>
+      <tr><th scope="row" class="m-text-3"><span class="m-dash" aria-hidden="true"></span>On real data</th><td>1,094,545 ClinVar records: both rewrite the same 0 rows</td><td>The retry and a forced re-run load each row once</td><td>1.79× with 4 workers on ClinVar</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="run" class="m-surface">
+  <p class="m-spread" data-motion="spread">Docker, uv and make are all it needs</p>
+  <div class="ml-grid l-grid">
+    <h2 class="ml-title m-text-2">Run <span class="m-serif">it.</span></h2>
+    <ol class="ml-steps" data-motion="dash">
+      <li class="ml-step"><span class="m-dash" aria-hidden="true"></span><h3 class="m-text-5">Clone</h3><p class="m-text"><code>git clone https://github.com/aleksandrahodzzik/genomic-etl-pipeline</code></p></li>
+      <li class="ml-step"><span class="m-dash" aria-hidden="true"></span><h3 class="m-text-5">Start the stack</h3><p class="m-text"><code>make up</code> starts PostgreSQL, Redis, MinIO, the API and a worker, and returns when they are healthy.</p></li>
+      <li class="ml-step"><span class="m-dash" aria-hidden="true"></span><h3 class="m-text-5">Open the web UI</h3><p class="m-text">At <code>localhost:8000</code>, with this same sample already loaded. Drop in your own VCF and FASTA.</p></li>
+      <li class="ml-step"><span class="m-dash" aria-hidden="true"></span><h3 class="m-text-5">Scale out</h3><p class="m-text"><code>docker compose up -d --scale worker=4</code>, then <code>make bench</code> to measure it.</p></li>
+    </ol>
+    <div class="ml-cta">
+      <a class="m-btn" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline"><span class="m-btn__label">Source on GitHub</span></a>
+      <p class="m-text-3">Python 3.12 · MIT licensed</p>
+    </div>
+  </div>
+</section>
+</main>
+<footer id="footer" class="m-surface">
+  <div class="ft-rule" aria-hidden="true"><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span><span class="m-dash"></span></div>
+  <div class="ft-grid l-grid">
+    <p class="ft-brand m-text-4">Variant ETL. Raw variant files in, <span class="m-serif">clean rows out.</span></p>
+    <div class="ft-col m-text-3">
+      <h2 class="m-text-3">Project</h2>
+      <a class="m-link" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline">Source</a>
+      <a class="m-link" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline/blob/main/docs/BENCHMARKS.md">Benchmark, synthetic</a>
+      <a class="m-link" href="https://github.com/aleksandrahodzzik/genomic-etl-pipeline/blob/main/docs/BENCHMARKS_CLINVAR.md">Benchmark, ClinVar</a>
+    </div>
+    <div class="ft-col m-text-3">
+      <h2 class="m-text-3">On this page</h2>
+      <a class="m-link" href="#pipeline">Pipeline</a>
+      <a class="m-link" href="#results">Sample run</a>
+      <a class="m-link" href="#scaling">Scaling</a>
+      <a class="m-link" href="#run">Run it</a>
+    </div>
+    <div class="ft-col m-text-3">
+      <h2 class="m-text-3">Snapshot</h2>
+      <p id="ftSnap">–</p>
+    </div>
+  </div>
+  <div class="ft-legal m-text-3">
+    <p>MIT License · Design adapted from the Reflow template by <a href="https://8b.com/templates/reflow/" style="color:inherit">8B</a> (<a href="LICENSE-reflow.txt" style="color:inherit">MIT</a>)</p>
+    <a class="m-link" href="#opening">Back to top</a>
+  </div>
+</footer>
+<script src="site.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/SplitText.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.3.27/dist/lenis.min.js"></script>
+<script src="motion.js"></script>
+</body>
+</html>

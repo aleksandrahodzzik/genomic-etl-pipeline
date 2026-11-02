@@ -1,0 +1,58 @@
+name: Pages
+
+# The project site, https://aleksandrahodzzik.github.io/genomic-etl-pipeline/: the landing page in
+# pages/ filled with a real run of the bundled sample. Every push builds it from the compose stack
+# and checks it in Chromium against the live API; only main publishes it.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Start the stack (its seed service processes the bundled sample)
+        run: docker compose up -d --build --wait
+      - name: Export the snapshot next to the page
+        run: uv run python scripts/export_pages.py --api http://localhost:8000 --out site
+      - name: Install Chromium
+        run: uv run --with playwright==1.64.1 playwright install --with-deps chromium
+      - name: Check the site in a browser against the API
+        run: uv run --with playwright==1.64.1 python scripts/pages_smoke.py --site site --api http://localhost:8000
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
