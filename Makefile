@@ -1,4 +1,4 @@
-.PHONY: up down test lint data demo-data demo bench bench-clinvar gif
+.PHONY: up down test lint data demo-data demo bench bench-clinvar gif space-build space-run space-smoke space-deploy
 
 # Everything the demo, tests and benchmark talk to. Waits until all long-running services
 # are healthy and the one-shot jobs (migrations, bucket creation) have finished.
@@ -22,7 +22,7 @@ data:
 	uv run python scripts/generate_data.py --contigs 3 --contig-length 5_000_000 \
 		--variants 1_000_000 --titv 2.0 --error-rate 0.005 --seed 42 --out-dir data/bench
 
-# The small dataset (3 contigs x 2 Mb, 200k records) used by the demo and the GIF.
+# The small dataset (3 contigs x 2 Mb, 200k records) used by `make demo`.
 demo-data:
 	uv run python scripts/generate_data.py --contigs 3 --contig-length 2_000_000 \
 		--variants 200_000 --titv 2.0 --error-rate 0.005 --seed 42 --out-dir data/demo
@@ -39,8 +39,25 @@ bench: data
 bench-clinvar: data
 	uv run python scripts/benchmark_clinvar.py
 
-# Re-record docs/images/demo.gif: the web UI processing the demo dataset, driven by Playwright.
-# Playwright and Pillow are fetched for this command only; they are not project dependencies.
-gif: demo-data
+# Re-record docs/images/demo.gif from a running demo image (`make space-run`, or
+# SPACE_URL=https://<space>.hf.space), driven by Playwright. Playwright and Pillow are
+# fetched for this command only; they are not project dependencies.
+gif:
 	uv run --with playwright==1.64.1 playwright install chromium
-	uv run --with playwright==1.64.1 --with pillow==13.0.0 python scripts/record_ui_gif.py
+	uv run --with playwright==1.64.1 --with pillow==13.0.0 python scripts/record_ui_gif.py \
+		--url $${SPACE_URL:-http://localhost:7860}
+
+# The public demo: every service in one container behind one port (Dockerfile.space).
+space-build:
+	docker build -f Dockerfile.space -t variant-etl-space .
+
+space-run: space-build
+	docker run --rm -p 7860:7860 variant-etl-space
+
+# Against a running demo container (space-run), or SPACE_URL=https://<space>.hf.space
+space-smoke:
+	uv run python scripts/space_smoke.py --url $${SPACE_URL:-http://localhost:7860}
+
+# Needs HF_TOKEN (write) in the environment or an earlier `hf auth login`.
+space-deploy:
+	uv run --with huggingface_hub python scripts/deploy_space.py

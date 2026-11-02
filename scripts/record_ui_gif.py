@@ -1,28 +1,25 @@
-"""Record docs/images/demo.gif: the web UI processing the `make demo` dataset.
+"""Record docs/images/demo.gif: the live demo processing 100,000 synthetic records.
 
-    make up && make gif
+    make gif SPACE_URL=https://<space>.hf.space     # or a local `make space-run`
 
-A headless Chromium driven by Playwright opens the UI, picks the two files of `make demo`
-(data/demo: 200,000 records, so two 100k-record chunks) through the page's own file pickers,
-starts the job, follows it through upload -> split -> chunks -> finalize, shows the
-statistics and filters the variant table by chromosome and type. Nothing on the page is
-mocked: every number in the GIF comes from the running stack.
+A headless Chromium driven by Playwright opens the demo, clicks "Run 100k synthetic records"
+(four 25,000-record chunks on the demo's two workers), follows the job through
+split -> chunks -> finalize, shows the statistics, then runs a region query: the variant
+table filtered to a 10 kb window of chr2. Nothing on the page is mocked: every number in the
+GIF comes from the deployment it records.
 
 Timing: the GIF plays at real speed except while the job runs, which is fast-forwarded so
 the whole clip stays under ~20 s; those frames carry an "Nx speed" badge, and the page's own
-status line ("Completed in N s") shows the real duration. The moments when Playwright hands
-the files to the browser are cut, since they are recording overhead, not the app.
+status line ("Completed in N s") shows the real duration.
 
 Frames come from Chromium's screencast (a frame whenever the page repaints, with its
 timestamp). A small drawn cursor shows where the clicks go; headless browsers paint none.
 
-The VCF gets one extra `##` meta line with a random id before upload: jobs are deduplicated
-by content, and without it a second recording would show "already processed" instead of a
-run. The recorded job is deleted afterwards (`--keep-job` keeps it).
+The recorded job stays on the demo, whose janitor deletes it after an hour.
 
 Playwright and Pillow are only needed here, so they are not project dependencies:
     uv run --with playwright==1.64.1 playwright install chromium
-    uv run --with playwright==1.64.1 --with pillow==13.0.0 python scripts/record_ui_gif.py
+    uv run --with playwright==1.64.1 --with pillow==13.0.0 python scripts/record_ui_gif.py --url ...
 """
 
 import argparse
@@ -34,7 +31,6 @@ import itertools
 import math
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -168,12 +164,6 @@ async def scroll_to(page: Page, selector: str, offset: int = 16, ms: int = 650) 
 
 
 async def record(args: argparse.Namespace) -> tuple[Recorder, str | None]:
-    vcf = (args.data_dir / "variants.vcf").read_bytes()
-    first_line_end = vcf.index(b"\n") + 1
-    marked_vcf = (
-        vcf[:first_line_end] + f"##recording_id={uuid.uuid4()}\n".encode() + vcf[first_line_end:]
-    )
-    reference = (args.data_dir / "ref.fa").read_bytes()
     job_id: str | None = None
 
     async with async_playwright() as pw:
@@ -188,15 +178,16 @@ async def record(args: argparse.Namespace) -> tuple[Recorder, str | None]:
 
         async def remember_job(response: Any) -> None:
             nonlocal job_id
-            if response.request.method == "POST" and response.url.endswith("/api/v1/jobs"):
+            if response.request.method == "POST" and response.url.endswith("/demo/synthetic"):
                 job_id = (await response.json())["id"]
 
         page.on("response", remember_job)
-        await page.goto(args.api.rstrip("/") + "/")
+        await page.goto(args.url.rstrip("/") + "/")
         await page.wait_for_function(
             "document.getElementById('healthText').textContent === 'API online'"
         )
         await page.wait_for_load_state("networkidle")  # the pre-loaded sample has rendered
+        await page.wait_for_selector("#btnSynthetic:not(.hidden)")
         pointer = Pointer(page, args.width * 0.55, args.height * 0.62, (args.width - 8, 300))
         await page.mouse.move(pointer.x, pointer.y)
 
@@ -204,25 +195,12 @@ async def record(args: argparse.Namespace) -> tuple[Recorder, str | None]:
         await recorder.start(page)
         await asyncio.sleep(0.7)
 
-        # 1. Pick the two files of `make demo` with the page's file pickers.
+        # 1. The demo's own dataset: 100,000 records, four chunks.
         await scroll_to(page, "#uploadCard", offset=24, ms=600)
-        for selector, payload in (
-            ("#dropVcf", {"name": "variants.vcf", "mimeType": "text/plain", "buffer": marked_vcf}),
-            ("#dropRef", {"name": "ref.fa", "mimeType": "text/plain", "buffer": reference}),
-        ):
-            await pointer.to(selector)
-            async with page.expect_file_chooser() as chooser:
-                await page.mouse.click(pointer.x, pointer.y)
-            recorder.speed(CUT)  # handing 9 MB to the browser is recording overhead
-            await (await chooser.value).set_files(payload)
-            await page.wait_for_function(
-                f"document.querySelector('{selector}').classList.contains('has')"
-            )
-            recorder.speed(1.0)
-            await asyncio.sleep(0.2)
+        await asyncio.sleep(0.4)
 
         # 2. Start the job; the page follows it through split -> chunks -> finalize.
-        await pointer.to("#btnRun", 0.45)
+        await pointer.to("#btnSynthetic", 0.6)
         await page.mouse.click(pointer.x, pointer.y)
         recorder.speed(FAST)
         await pointer.park()
@@ -242,19 +220,26 @@ async def record(args: argparse.Namespace) -> tuple[Recorder, str | None]:
 
         # 3. Statistics.
         await scroll_to(page, "#results > .grid2", offset=16, ms=600)
-        await asyncio.sleep(1.3)
+        await asyncio.sleep(1.1)
         await scroll_to(page, "#paneVar", offset=110, ms=650)
         await asyncio.sleep(0.3)
 
-        # 4. Query: filter the variant table by chromosome, then by type.
-        for selector, value in (("#fChrom", "chr2"), ("#fType", "DEL")):
-            x, y = await pointer.to(selector, 0.45)
+        # 4. Region query: chr2, then a 10 kb window on it.
+        x, y = await pointer.to("#fChrom", 0.45)
+        await page.evaluate("([x, y]) => window.__recRing(x, y)", [x, y])
+        async with page.expect_response(lambda r: "/variants?" in r.url):
+            await page.select_option("#fChrom", "chr2")
+        await asyncio.sleep(0.4)
+        for selector, value in (("#fStart", "250000"), ("#fEnd", "260000")):
+            x, y = await pointer.to(selector, 0.4)
             await page.evaluate("([x, y]) => window.__recRing(x, y)", [x, y])
+            await page.click(selector)
+            await page.keyboard.type(value, delay=45)
             async with page.expect_response(lambda r: "/variants?" in r.url):
-                await page.select_option(selector, value)
-            await asyncio.sleep(0.5)
+                await page.keyboard.press("Tab")  # `change` fires when the field loses focus
+            await asyncio.sleep(0.4)
         await pointer.park()
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.9)
         await recorder.stop()
         await browser.close()
     return recorder, job_id
@@ -326,21 +311,9 @@ def build_gif(recorder: Recorder, out: Path, fps: float, fast_seconds: float) ->
     return sum(durations) / 1000, len(quantized)
 
 
-def delete_job(job_id: str) -> None:
-    from sqlalchemy import text
-
-    from variant_etl.db.session import get_engine
-    from variant_etl.storage.s3 import get_storage
-
-    with get_engine().begin() as conn:
-        conn.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": job_id})
-    get_storage().delete_prefix(f"chunks/{job_id}/")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api", default="http://localhost:8000")
-    parser.add_argument("--data-dir", default=ROOT / "data" / "demo", type=Path)
+    parser.add_argument("--url", default="http://localhost:7860", help="a running demo image")
     parser.add_argument("--out", default=ROOT / "docs" / "images" / "demo.gif", type=Path)
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=640)
@@ -352,22 +325,12 @@ def main() -> int:
         help="roughly how long the running job takes in the GIF (it is sped up to fit)",
     )
     parser.add_argument("--timeout", type=float, default=300, help="seconds to wait for the job")
-    parser.add_argument("--keep-job", action="store_true", help="do not delete the recorded job")
     args = parser.parse_args()
-    if not (args.data_dir / "variants.vcf").exists():
-        print(f"{args.data_dir}/variants.vcf is missing; run `make demo` first", file=sys.stderr)
-        return 1
 
     recorder, job_id = asyncio.run(record(args))
     seconds, count = build_gif(recorder, args.out, args.fps, args.fast_seconds)
     size = args.out.stat().st_size / 2**20
-    print(f"wrote {args.out}: {seconds:.1f} s, {count} frames, {size:.1f} MiB")
-    if job_id and not args.keep_job:
-        try:
-            delete_job(job_id)
-            print(f"deleted the recorded job {job_id}")
-        except Exception as exc:  # cleanup is best effort: the GIF is already written
-            print(f"could not delete job {job_id} ({exc}); it stays in the database")
+    print(f"wrote {args.out}: {seconds:.1f} s, {count} frames, {size:.1f} MiB (job {job_id})")
     return 0
 
 

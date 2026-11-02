@@ -130,3 +130,11 @@ class DemoOut(BaseModel):
     job: JobOut | None = Field(
         description="The pre-loaded sample job, or null if the stack was started without seeding."
     )
+    synthetic: bool = Field(
+        False, description="Whether `POST /api/v1/demo/synthetic` is available (public demo)."
+    )
+    max_upload_mb: int | None = Field(
+        None, description="Largest file this deployment accepts, if it sets a limit."
+    )
+    notice: str | None = Field(None, description="This deployment's limits, for the web UI.")
+    chunk_size: int = Field(description="Records per chunk on this deployment.")

@@ -1,0 +1,18 @@
+# Build context of Dockerfile.space (BuildKit reads this file instead of .dockerignore).
+# Same as .dockerignore, except that the demo needs the data generator.
+.git
+.github
+.venv
+.env
+.pytest_cache
+.mypy_cache
+.ruff_cache
+**/__pycache__
+*.pyc
+data/
+tests/
+docs/
+app/
+Makefile
+scripts/*
+!scripts/generate_data.py

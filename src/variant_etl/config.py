@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     # Full per-reason counts are always kept; only this many raw lines per chunk are stored.
     max_rejected_samples_per_chunk: int = 10_000
 
+    # Public demo only (the Hugging Face Space sets these). The defaults change nothing.
+    # More than 0: `POST /jobs` answers 429 while this many jobs are queued or running.
+    max_active_jobs: int = 0
+    # A directory holding variants.vcf + ref.fa; enables `POST /demo/synthetic`.
+    demo_synthetic_dir: str = ""
+    # Largest upload the demo accepts, in MB. Shown and checked in the web UI; the demo's
+    # reverse proxy enforces it.
+    demo_max_upload_mb: int = 0
+    # A line about the demo's limits, shown in the web UI.
+    demo_notice: str = ""
+    # Jobs and files older than this are deleted by `python -m variant_etl.janitor`.
+    demo_retention_minutes: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

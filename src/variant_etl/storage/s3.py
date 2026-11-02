@@ -7,6 +7,7 @@ are reached by IP or a single hostname, not by `<bucket>.<host>`.
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -109,6 +110,25 @@ class ObjectStorage:
 
     def upload_file(self, path: Path, key: str) -> None:
         self._client.upload_file(str(path), self.bucket, key)
+
+    def delete_older_than(
+        self, prefixes: tuple[str, ...], cutoff: datetime, keep: tuple[str, ...] = ()
+    ) -> int:
+        """Delete objects under `prefixes` last modified before `cutoff`, except keys that
+        start with one of `keep`. Used by the public demo's janitor."""
+        deleted = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for prefix in prefixes:
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                objects = [
+                    {"Key": item["Key"]}
+                    for item in page.get("Contents", [])
+                    if item["LastModified"] < cutoff and not item["Key"].startswith(keep)
+                ]
+                if objects:
+                    self._client.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+                    deleted += len(objects)
+        return deleted
 
     def delete_prefix(self, prefix: str) -> int:
         """Delete every object under a prefix (used to clean up chunk objects)."""

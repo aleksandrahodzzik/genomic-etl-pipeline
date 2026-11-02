@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Variant ETL</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6f5e'/%3E%3Cpath d='M10 7c0 6 12 6 12 12s-12 6-12 6M22 7c0 6-12 6-12 12' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
 <script>
   // Apply the saved theme before the first paint so the page does not flash light.
   try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -84,6 +85,7 @@
   .how .no { font: 400 13px var(--serif); color: var(--accent); letter-spacing: 1px; }
   .how b { display: block; margin: 4px 0 6px; font-weight: 600; }
   .how span { color: var(--muted); font-size: 13.5px; display: block; }
+  .how span span { display: inline; font-size: inherit; }
 
   .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .drop { border: 1px dashed var(--line2); border-radius: 10px; padding: 26px 18px; text-align: center; cursor: pointer;
@@ -154,8 +156,9 @@
   .tab { display: flex; gap: 0; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
   .tab button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 18px 10px; color: var(--muted); }
   .tab button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-  select { font: inherit; font-size: 13.5px; background: var(--field); color: var(--ink); border: 1px solid var(--line2);
+  select, .filters input { font: inherit; font-size: 13.5px; background: var(--field); color: var(--ink); border: 1px solid var(--line2);
            border-radius: 6px; padding: 5px 10px; }
+  .filters input { width: 9.5em; font-variant-numeric: tabular-nums; }
   .filters { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .tip { cursor: help; border-bottom: 1px dotted var(--muted); }
   .hidden { display: none !important; }
@@ -209,7 +212,7 @@
     <p class="hint">What happens behind the button, in four steps.</p>
     <div class="steps">
       <div class="how"><span class="no">01</span><b>Upload</b><span>The browser sends the files directly to object storage (S3). The API never handles the file bytes.</span></div>
-      <div class="how"><span class="no">02</span><b>Split</b><span>One worker cuts the file into chunks of 100,000 records.</span></div>
+      <div class="how"><span class="no">02</span><b>Split</b><span>One worker cuts the file into chunks of <span id="chunkSize">100,000</span> records.</span></div>
       <div class="how"><span class="no">03</span><b>Process</b><span>Workers handle chunks in parallel: reject bad lines, normalize the rest, bulk-load into PostgreSQL.</span></div>
       <div class="how"><span class="no">04</span><b>Finalize and query</b><span>Totals are computed; the API serves statistics and searchable variants.</span></div>
     </div>
@@ -219,6 +222,7 @@
     <div class="eyebrow">Input</div>
     <h3>Run a job</h3>
     <p class="hint">Use the bundled sample (3,000 records, with some deliberate errors) or provide your own files.</p>
+    <p class="hint hidden" id="demoNotice"></p>
     <div class="drops">
       <label class="drop" id="dropVcf">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg>
@@ -237,6 +241,7 @@
       <button class="primary" id="btnRun" disabled>Start processing</button>
       <span class="or">or</span>
       <button id="btnSample">Use sample data</button>
+      <button id="btnSynthetic" class="hidden" title="100,000 records made by scripts/generate_data.py, a fresh copy for each click">Run 100k synthetic records</button>
     </div>
     <div id="banner"></div>
   </section>
@@ -285,6 +290,8 @@
         <div class="filters">
           Chromosome <select id="fChrom"><option value="">all</option></select>
           Type <select id="fType"><option value="">all</option><option>SNV</option><option>INS</option><option>DEL</option><option>MNV</option><option>COMPLEX</option></select>
+          Region <input id="fStart" type="number" min="1" step="1" inputmode="numeric" placeholder="from" aria-label="Region start (1-based)">
+          to <input id="fEnd" type="number" min="1" step="1" inputmode="numeric" placeholder="to" aria-label="Region end (inclusive)">
           <span id="varCount"></span>
         </div>
         <div class="tablewrap"><table>
@@ -326,6 +333,7 @@ const REASONS = {
 
 let vcfFile = null, refFile = null, jobId = null, busy = false;
 let varCursor = null, rejCursor = null;
+let maxUploadMb = 0; // set by a deployment with an upload limit (the public demo)
 
 // ---------- theme ----------
 $("themeBtn").onclick = () => {
@@ -357,9 +365,14 @@ function wireDrop(box, input, nameEl, setter, placeholder) {
 }
 wireDrop($("dropVcf"), $("fileVcf"), $("nameVcf"), (f) => (vcfFile = f), "Variants (.vcf or .vcf.gz)");
 wireDrop($("dropRef"), $("fileRef"), $("nameRef"), (f) => (refFile = f), "Reference (.fa or .fa.gz)");
-function refreshRun() { $("btnRun").disabled = busy || !(vcfFile && refFile); $("btnSample").disabled = busy; }
+function refreshRun() {
+  $("btnRun").disabled = busy || !(vcfFile && refFile);
+  $("btnSample").disabled = busy; $("btnSynthetic").disabled = busy;
+}
 
 $("btnRun").onclick = () => run(vcfFile, refFile);
+$("btnSynthetic").onclick = () =>
+  track("Copying 100,000 synthetic records into object storage", () => api("/demo/synthetic", { method: "POST" }));
 $("btnSample").onclick = async () => {
   try {
     const [v, r] = await Promise.all(["variants.vcf", "ref.fa"].map(async (n) => {
@@ -387,6 +400,7 @@ async function upload(file) {
   const meta = await api("/uploads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: file.name }) });
   const put = await fetch(meta.upload_url, { method: "PUT", body: file });
   await put.text(); // drain the body so the browser does not report the request as aborted
+  if (put.status === 413) throw new Error(`${file.name} is larger than this server accepts`);
   if (!put.ok) throw new Error("upload to storage failed (" + put.status + ")");
   return meta.key;
 }
@@ -407,17 +421,30 @@ function drawStepper(active, failed) {
 // ---------- run a job ----------
 async function run(vcf, ref) {
   if (busy) return;
+  const tooBig = maxUploadMb ? [vcf, ref].find((f) => f.size > maxUploadMb * 1048576) : null;
+  if (tooBig) {
+    banner("err", `${tooBig.name} is ${(tooBig.size / 1048576).toFixed(1)} MB; this demo accepts files up to ${maxUploadMb} MB.`);
+    return;
+  }
+  await track("Uploading files directly to object storage", async () => {
+    const [vcfKey, refKey] = await Promise.all([upload(vcf), upload(ref)]);
+    drawStepper(1, false); $("statusText").textContent = "Creating the job";
+    return api("/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ vcf_key: vcfKey, reference_key: refKey }) });
+  });
+}
+
+// Shows a job from its creation to its results; `createJob` uploads and submits it.
+async function track(firstStatus, createJob) {
+  if (busy) return;
   busy = true; refreshRun(); banner("", "");
   $("results").classList.add("hidden");
   $("progressCard").classList.remove("hidden");
   $("jobLine").textContent = "";
   $("barFill").style.width = "3%"; $("chunkText").textContent = "";
-  drawStepper(0, false); $("statusText").textContent = "Uploading files directly to object storage";
+  drawStepper(0, false); $("statusText").textContent = firstStatus;
   $("progressCard").scrollIntoView({ behavior: "smooth", block: "center" });
   try {
-    const [vcfKey, refKey] = await Promise.all([upload(vcf), upload(ref)]);
-    drawStepper(1, false); $("statusText").textContent = "Creating the job";
-    const job = await api("/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ vcf_key: vcfKey, reference_key: refKey }) });
+    const job = await createJob();
     jobId = job.id;
     $("jobLine").innerHTML = `Job <span class="mono">${esc(job.id)}</span>`;
     if (job.deduplicated) banner("info", "These exact files were already processed. Showing the existing result instead of redoing the work.");
@@ -503,7 +530,13 @@ async function showResults(job, scroll = true) {
 // visitors see real results immediately instead of an empty page.
 async function loadDemo() {
   try {
-    let { job } = await api("/demo");
+    const demo = await api("/demo");
+    // A public deployment states its limits and may offer a larger synthetic dataset.
+    if (demo.notice) { $("demoNotice").textContent = demo.notice; $("demoNotice").classList.remove("hidden"); }
+    maxUploadMb = demo.max_upload_mb || 0;
+    if (demo.chunk_size) $("chunkSize").textContent = fmt(demo.chunk_size);
+    $("btnSynthetic").classList.toggle("hidden", !demo.synthetic);
+    let job = demo.job;
     if (!job || job.status === "failed") return;
     jobId = job.id;
     busy = true; refreshRun();
@@ -529,6 +562,8 @@ async function loadVariants(reset) {
   const q = new URLSearchParams({ limit: "25" });
   if ($("fChrom").value) q.set("chrom", $("fChrom").value);
   if ($("fType").value) q.set("type", $("fType").value);
+  if ($("fStart").value) q.set("start", $("fStart").value);
+  if ($("fEnd").value) q.set("end", $("fEnd").value);
   if (varCursor) q.set("cursor", varCursor);
   const page = await api(`/jobs/${jobId}/variants?${q}`);
   $("varBody").insertAdjacentHTML("beforeend", page.items.map((v) => {
@@ -544,9 +579,10 @@ async function loadVariants(reset) {
   $("btnMore").classList.toggle("hidden", !varCursor);
   $("varCount").textContent = $("varBody").children.length ? `showing ${$("varBody").children.length}` : "no matching variants";
 }
-$("fChrom").onchange = () => loadVariants(true);
-$("fType").onchange = () => loadVariants(true);
-$("btnMore").onclick = () => loadVariants(false);
+// A bad filter (say, a start after the end) shows the API's message instead of failing silently.
+const reloadVariants = (reset) => loadVariants(reset).catch((e) => { $("varCount").textContent = e.message; });
+["fChrom", "fType", "fStart", "fEnd"].forEach((id) => { $(id).onchange = () => reloadVariants(true); });
+$("btnMore").onclick = () => reloadVariants(false);
 
 // ---------- rejected table ----------
 async function loadRejected(reset) {
