@@ -121,10 +121,47 @@ def test_build_site_replaces_an_old_build(tmp_path):
     pages.mkdir()
     (pages / "index.html").write_text("new", encoding="utf-8")
     out = tmp_path / "site"
-    out.mkdir()
+    (out / "data").mkdir(parents=True)
+    (out / "data" / "snapshot.json").write_text("{}", encoding="utf-8")
     (out / "stale.js").write_text("old", encoding="utf-8")
 
     export_pages.build_site({}, out, pages_dir=pages)
 
     assert not (out / "stale.js").exists()
     assert (out / "index.html").read_text(encoding="utf-8") == "new"
+
+
+def test_build_site_refuses_a_folder_that_is_not_a_previous_build(tmp_path):
+    # `--out .` or a typo must not delete a working tree: only an earlier build is replaced.
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "index.html").write_text("new", encoding="utf-8")
+    out = tmp_path / "work"
+    out.mkdir()
+    (out / "notes.txt").write_text("keep me", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="not a previous build"):
+        export_pages.build_site({}, out, pages_dir=pages)
+
+    assert (out / "notes.txt").read_text(encoding="utf-8") == "keep me"
+
+
+def test_build_site_refuses_to_write_over_its_own_sources(tmp_path):
+    pages = tmp_path / "pages"
+    (pages / "data").mkdir(parents=True)
+    (pages / "data" / "snapshot.json").write_text("{}", encoding="utf-8")
+    (pages / "index.html").write_text("source", encoding="utf-8")
+
+    for out in (pages, tmp_path):
+        with pytest.raises(SystemExit, match="pages"):
+            export_pages.build_site({}, out, pages_dir=pages)
+
+    assert (pages / "index.html").read_text(encoding="utf-8") == "source"
+
+
+def test_the_template_license_ships_with_the_page():
+    # pages/ adapts the MIT-licensed Reflow template; MIT requires its notice in every copy, and
+    # build_site copies the whole folder, so the published site carries it too.
+    notice = (export_pages.PAGES / "LICENSE-reflow.txt").read_text(encoding="utf-8")
+    assert "Copyright (c) 2026 8B (https://8b.com)" in notice
+    assert "Permission is hereby granted, free of charge" in notice

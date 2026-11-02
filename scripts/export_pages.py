@@ -87,8 +87,16 @@ def collect(client: httpx.Client, timeout: float, poll: float = 1.0) -> dict[str
 
 
 def build_site(snapshot: dict[str, Any], out: Path, pages_dir: Path = PAGES) -> None:
-    """A fresh copy of pages/ in `out`, with the snapshot in out/data/snapshot.json."""
+    """A fresh copy of pages/ in `out`, with the snapshot in out/data/snapshot.json.
+
+    `out` is deleted first, so it must be a previous build (it has data/snapshot.json) or empty,
+    and neither pages/ nor a folder that contains it."""
+    out, pages_dir = out.resolve(), pages_dir.resolve()
+    if out == pages_dir or out in pages_dir.parents:
+        raise SystemExit(f"--out {out} would overwrite the page sources in {pages_dir}")
     if out.exists():
+        if any(out.iterdir()) and not (out / "data" / "snapshot.json").is_file():
+            raise SystemExit(f"--out {out} is not a previous build (no data/snapshot.json)")
         shutil.rmtree(out)
     shutil.copytree(pages_dir, out)
     (out / "data").mkdir(exist_ok=True)

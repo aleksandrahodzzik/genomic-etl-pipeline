@@ -8,9 +8,9 @@ A service for bioinformatics teams that turns a raw VCF file of genetic variants
 
 **[Project site](https://aleksandrahodzzik.github.io/genomic-etl-pipeline/)**: the validation results, statistics and a searchable table of variants from a real run of the bundled sample, rebuilt by CI from the running stack on every push to `main`. It is a static snapshot; to process your own files, start the stack locally ([Quickstart](#quickstart-local)).
 
-![The demo image: 100,000 synthetic records processed as four chunks by two workers, the statistics, then a region query on chr2](docs/images/demo.gif)
+![The web UI processing the make demo dataset: upload, two 100k-record chunks, statistics, then the variant table filtered by chromosome and type](docs/images/demo.gif)
 
-<sub>The [single-container demo image](#the-single-container-image): **Run 100k synthetic records**, four 25,000-record chunks on two workers, the statistics, then a region query. Recorded headless with Playwright by [`scripts/record_ui_gif.py`](scripts/record_ui_gif.py). Real speed, except where the badge says the running job is fast-forwarded; the page's "Completed in … s" is the real time.</sub>
+<sub>The web UI processing the `make demo` data: 200,000 records (0.5% deliberately broken) are uploaded, split into two 100k-record chunks and loaded; then the statistics, and the variant table filtered to deletions on chr2. Recorded headless with Playwright. Real speed except the running job, which is fast-forwarded as the badge says; the page's "Completed in … s" is the real time.</sub>
 
 - **Scales out by adding containers**: 1 → 4 worker containers gave 1.7–1.9× the throughput on one laptop (30,567 → 57,241 records/s on 1M synthetic records, 27,758 → 49,565 on 1.09M ClinVar records). Chunks are independent, so N workers process N chunks at once.
 - **Safe to retry**: chunk writes are idempotent, so a crashed or redelivered chunk never produces duplicate rows. [`test_crash_just_before_commit_leaves_nothing_and_the_retry_loads_exactly_once`](tests/integration/test_pipeline_direct.py) crashes a chunk after `COPY` has streamed every row but before `COMMIT`, then checks that nothing is visible and that the retry, and a forced re-run, load each row exactly once.
@@ -63,7 +63,7 @@ Then open the web UI at <http://localhost:8010/> (the interactive API docs are a
 
 If port 8000 or 5432 is already taken by another project, move them: `API_PORT=8010 POSTGRES_PORT=5433 make up`, then use `http://localhost:8010/`. (`make demo`, the benchmark and the tests default to the standard ports: pass `--api`, or set `API_URL` and `DATABASE_URL`, to follow the change.)
 
-Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)), `make bench-clinvar` (the real-data benchmark that writes [`docs/BENCHMARKS_CLINVAR.md`](docs/BENCHMARKS_CLINVAR.md); downloads ~0.4 GB on first use), `make gif` (re-records the GIF above with Playwright), `make pages` (builds the [project site](#the-project-site) from a running stack and checks it in Chromium) and `make space-run` (the [single-container image](#the-single-container-image)).
+Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)), `make bench-clinvar` (the real-data benchmark that writes [`docs/BENCHMARKS_CLINVAR.md`](docs/BENCHMARKS_CLINVAR.md); downloads ~0.4 GB on first use), `make gif` (records `docs/images/demo.gif` from a running single-container image with Playwright), `make pages` (builds the [project site](#the-project-site) from a running stack and checks it in Chromium) and `make space-run` (the [single-container image](#the-single-container-image)).
 
 > **Windows without `make`**: the Makefile is a thin wrapper, so run the commands it contains. For example, `docker compose up -d --build --wait` is `make up`; the recipes for `demo` and `bench` are two `uv run python scripts/...` lines.
 
@@ -230,7 +230,7 @@ Row semantics worth knowing:
 ## Testing
 
 ```bash
-make test        # 190 tests; integration tests need `make up` first
+make test        # 193 tests; integration tests need `make up` first
 make lint        # ruff check, ruff format --check, mypy
 ```
 

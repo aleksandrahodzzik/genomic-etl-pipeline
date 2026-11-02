@@ -1,5 +1,6 @@
 /* Variant ETL · GitHub Pages. Layers, tokens, type scale and section styles adapted from the
-   Reflow template by 8B (https://8b.com/templates/reflow/, MIT). */
+   Reflow template by 8B (https://8b.com/templates/reflow/), MIT License, Copyright (c) 2026 8B;
+   full notice in LICENSE-reflow.txt. */
 @layer tokens, base, atoms, layout, sections, scenes;
 
 @layer tokens {

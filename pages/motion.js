@@ -1,5 +1,6 @@
 // Variant ETL · GitHub Pages: scroll motion. Adapted from the Reflow template by 8B
-// (https://8b.com/templates/reflow/, MIT). Scenes only enhance: without GSAP (blocked CDN) or
+// (https://8b.com/templates/reflow/), MIT License, Copyright (c) 2026 8B; full notice in
+// LICENSE-reflow.txt. Scenes only enhance: without GSAP (blocked CDN) or
 // under prefers-reduced-motion the page reads the same, and a scene that throws is reverted.
 
 // ---------- navigation: hide on scroll, full-screen menu (no GSAP needed) ----------
