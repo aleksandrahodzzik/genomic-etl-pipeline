@@ -67,6 +67,56 @@ def page_ids(page: Page, filters: dict[str, Any]) -> list[int]:
     return list(page.evaluate("f => window.variantEtl.query(f).items.map(v => v.id)", filters))
 
 
+def watch(page: Page, problems: list[str], label: str) -> None:
+    """Collect console errors, uncaught exceptions and failed requests of one page."""
+    page.on(
+        "console",
+        lambda m: problems.append(f"{label} console: {m.text}") if m.type == "error" else None,
+    )
+    page.on("pageerror", lambda e: problems.append(f"{label} page error: {e}"))
+    page.on("requestfailed", lambda r: problems.append(f"{label} request failed: {r.url}"))
+    page.on(
+        "response",
+        lambda r: problems.append(f"{label} HTTP {r.status}: {r.url}") if r.status >= 400 else None,
+    )
+
+
+REASONS = [
+    "malformed_line",
+    "non_numeric_qual",
+    "unknown_contig",
+    "pos_out_of_bounds",
+    "unsupported_symbolic",
+    "invalid_allele_chars",
+    "ref_mismatch",
+]
+
+
+def expected_kpis(summary: dict[str, Any]) -> list[str]:
+    """The six numbers of the results section, written the way the API's summary says."""
+    r, titv = summary["records"], summary["titv_ratio"]
+    return [
+        f"{r['total']:,}",
+        f"{r['accepted']:,}",
+        f"{r['rejected']:,}",
+        f"{summary['variants']:,}",
+        "\u2013" if titv is None else f"{titv:.2f}",  # the page's en dash for "no value"
+        f"{summary['normalized_percent']:.1f}%",
+    ]
+
+
+def expected_board(summary: dict[str, Any], job: dict[str, Any]) -> list[str]:
+    """The ten results of the pipeline board, in its order."""
+    counts = [summary["rejected_by_reason"].get(k, {}).get("count", 0) for k in REASONS]
+    seconds = job["duration_seconds"]
+    took = "" if seconds is None else f" in {seconds:.2f} s"
+    return [f"{n:,} refused" if n else "none refused" for n in counts] + [
+        f"{summary['records']['accepted']:,} lines → {summary['variants']:,} rows",
+        f"{summary['normalized']:,} rows rewritten",
+        f"{summary['variants']:,} rows{took}",
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--site", type=Path, default=Path("site"))
@@ -88,27 +138,17 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on(
-            "console",
-            lambda m: problems.append(f"console {m.type}: {m.text}") if m.type == "error" else None,
-        )
-        page.on("pageerror", lambda e: problems.append(f"page error: {e}"))
-        page.on("requestfailed", lambda r: problems.append(f"request failed: {r.url}"))
-        page.on(
-            "response",
-            lambda r: problems.append(f"HTTP {r.status}: {r.url}") if r.status >= 400 else None,
-        )
+        watch(page, problems, "desktop")
         page.goto(url, wait_until="networkidle")
         snapshot_job = page.evaluate("window.variantEtl.ready.then(s => s.job.id)")
         check(snapshot_job == job["id"], f"the page loaded the snapshot of job {job['id'][:8]}")
 
-        kpi = page.locator("#kpis .rs-kpi__v").first.inner_text()
-        check(kpi == f"{summary['records']['total']:,}", f"'lines read' shows the API's {kpi}")
-        malformed = summary["rejected_by_reason"].get("malformed_line", {}).get("count", 0)
-        board = page.locator('[data-check="malformed_line"] .dg-val').inner_text()
+        kpis = page.locator("#kpis .rs-kpi__v").all_text_contents()
+        check(kpis == expected_kpis(summary), f"the six result numbers equal the API's: {kpis}")
+        board = page.locator("#pipeline [data-check] .dg-val").all_text_contents()
         check(
-            board.startswith(f"{malformed:,} ") or (malformed == 0 and board.startswith("none")),
-            f"the board shows {board!r}",
+            board == expected_board(summary, job),
+            f"the ten board results equal the API's: {board[0]!r} … {board[-1]!r}",
         )
 
         # Region bounds are real variant positions, so an off-by-one at either edge shows.
@@ -167,9 +207,15 @@ def main() -> int:
             f"the refused-lines tab lists {rejected} lines",
         )
 
+        # The phone layout runs its own scenes (the board scrubs in flow instead of pinning);
+        # scroll the whole page so each one starts while the error listeners are attached.
         phone = browser.new_page(viewport={"width": 360, "height": 780})
+        watch(phone, problems, "phone")
         phone.goto(url, wait_until="networkidle")
         phone.evaluate("window.variantEtl.ready")
+        for section in ("pipeline", "results", "scaling", "claims", "run"):
+            phone.evaluate(f"document.getElementById('{section}').scrollIntoView()")
+            phone.wait_for_timeout(600)
         width = phone.evaluate("document.documentElement.scrollWidth")
         check(width <= 360, f"no horizontal scroll at 360 px (page is {width} px wide)")
         browser.close()

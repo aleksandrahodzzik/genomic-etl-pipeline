@@ -127,7 +127,7 @@
     return `<tr><td class="mono">${esc(v.chrom)}:${fmt(v.pos)}</td>` +
       `<td class="mono">${esc(cut(v.ref, 14))} → ${esc(cut(v.alt, 14))}</td>` +
       `<td><span class="rs-badge${v.variant_type === "SNV" ? " is-snv" : ""}">${type}</span></td>` +
-      `<td>${v.qual ?? "–"}</td><td>${v.af ?? "–"}</td>` +
+      `<td>${esc(v.qual ?? "–")}</td><td>${esc(v.af ?? "–")}</td>` +
       `<td>${v.was_normalized ? '<span class="rs-badge is-new">rewritten</span>' : '<span class="rs-muted">as written</span>'}</td></tr>`;
   }
 

@@ -3,10 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer push cancels an older run, except on main, where a run may be deploying the site.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
@@ -100,3 +105,49 @@ jobs:
           context: .
           push: false
           tags: variant-etl:ci
+
+  # The project site, https://aleksandrahodzzik.github.io/genomic-etl-pipeline/: pages/ filled
+  # with a real run of the bundled sample, checked in Chromium against the live API.
+  pages-build:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Start the stack (its seed service processes the bundled sample)
+        run: docker compose up -d --build --wait
+      - name: Export the snapshot next to the page
+        run: uv run python scripts/export_pages.py --api http://localhost:8000 --out site
+      - name: Install Chromium
+        run: uv run --with playwright==1.64.1 playwright install --with-deps chromium
+      - name: Check the site in a browser against the API
+        run: uv run --with playwright==1.64.1 python scripts/pages_smoke.py --site site --api http://localhost:8000
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: site
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+  # Publishes only from main, and only after every other job has passed.
+  pages-deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [integration, space-image, docker-build, pages-build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

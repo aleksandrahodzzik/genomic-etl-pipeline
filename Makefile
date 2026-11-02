@@ -49,10 +49,11 @@ gif:
 
 # The project site (GitHub Pages) from a running stack (`make up`): pages/ plus a snapshot of the
 # sample run in site/, then checked in Chromium against the API. Serve site/ with any static server.
+# Follows API_PORT like `make up` does: API_PORT=8010 make pages
 pages:
-	uv run python scripts/export_pages.py --out site
+	uv run python scripts/export_pages.py --api http://localhost:$${API_PORT:-8000} --out site
 	uv run --with playwright==1.64.1 playwright install chromium
-	uv run --with playwright==1.64.1 python scripts/pages_smoke.py --site site
+	uv run --with playwright==1.64.1 python scripts/pages_smoke.py --site site --api http://localhost:$${API_PORT:-8000}
 
 # The public demo: every service in one container behind one port (Dockerfile.space).
 space-build:
