@@ -4,11 +4,39 @@
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-An asynchronous ETL service for genomic variant data. You upload a VCF and a reference FASTA straight to S3-compatible storage; a Celery chord splits the VCF into 100k-record chunks, independent worker containers validate and normalize them (equivalent to `bcftools norm -m -any -f`), bulk-load the result into an indexed PostgreSQL schema with `COPY`, and a FastAPI service serves statistics and keyset-paginated queries over it.
+A service for bioinformatics teams that turns a raw VCF file of genetic variants into clean, queryable data: it checks every record against the reference genome, rewrites it into the one standard form `bcftools norm` would produce, loads it into PostgreSQL in parallel chunks, and serves statistics and region queries through a REST API and a web UI.
 
-- **Scales out by adding containers**: `docker compose up --scale worker=4`. On the 1M-record benchmark below, going from 1 to 4 workers cut the wall time by a factor of 1.7–1.9 on one laptop (two independent sessions).
+![The web UI processing the make demo dataset: upload, two 100k-record chunks, statistics, then the variant table filtered by chromosome and type](docs/images/demo.gif)
+
+<sub>The web UI processing the `make demo` data: 200,000 records (0.5% deliberately broken) are uploaded, split into two 100k-record chunks and loaded; then the statistics, and the variant table filtered to deletions on chr2. Recorded headless with Playwright by `make gif` ([`scripts/record_ui_gif.py`](scripts/record_ui_gif.py)). Real speed except the running job, which is fast-forwarded as the badge says; the page's "Completed in … s" is the real time.</sub>
+
+**Run it** (needs Docker, [uv](https://docs.astral.sh/uv/) and `make`), then open <http://localhost:8000/>:
+
+```bash
+make up      # the whole stack in containers; returns when everything is healthy
+make demo    # generates 200k records, runs a job through the API, prints the stats
+```
+
+## Results on real data
+
+[ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) GRCh38 (release 2026-10-25, chromosomes 1, 2 and 17: 1,094,545 records, a quarter of the release) next to the synthetic 1M-record set, both measured on one laptop in the same session. Method, inputs with checksums and raw numbers: [`docs/BENCHMARKS_CLINVAR.md`](docs/BENCHMARKS_CLINVAR.md); reproduce with `make bench-clinvar`.
+
+| | Synthetic, 1M records | ClinVar GRCh38, 1.09M records |
+|---|---:|---:|
+| Throughput, 1 worker container | 30,567 records/s (32.7 s) | 27,758 records/s (39.4 s) |
+| Throughput, 4 worker containers | 57,241 records/s (17.5 s) | 49,565 records/s (22.1 s) |
+| Rejected records | 5,000 (0.5%), broken on purpose | 312 (0.03%), all `ALT .` |
+| Rows rewritten by normalization | 268,552 (24.7%) | 0, as `bcftools norm` agrees |
+| Region query, 10 kb window, with index: median / p95 | 1.8 / 2.6 ms | 1.6 / 5.8 ms |
+| Same query without the index: median | 103 ms | 64 ms |
+
+The 312 rejected ClinVar records have no alternate allele: they are ClinVar's records about the reference allele itself (HGVS `g.N=`, "no change"), so there is nothing to store. ClinVar ships already normalized, and `bcftools norm` over the same records also splits and realigns nothing. The higher ClinVar p95 comes from clinical variants clustering in genes: its densest 10 kb window holds 6,741 rows, against at most 839 in the synthetic set. The laptop was short of memory during this run, so all times are probably a little pessimistic; the report explains why.
+
+- **Scales out by adding containers**: `docker compose up --scale worker=4`. Chunks are independent, so N worker containers process N chunks at once; sub-linear here because all of them share one laptop with PostgreSQL.
 - **Safe to retry**: chunk writes are idempotent, so a crashed or redelivered chunk never produces duplicate rows (there is an integration test that forces exactly that).
 - **Checked against an independent implementation**: normalized output is compared record by record with `bcftools norm`, and a generator with a built-in ground truth checks the whole pipeline.
+
+How it works, in one paragraph: the client uploads the VCF and reference FASTA straight to S3-compatible storage with presigned URLs; a Celery chord splits the VCF into 100k-record chunks; independent worker containers validate and normalize them (equivalent to `bcftools norm -m -any -f`) and bulk-load the rows into an indexed PostgreSQL schema with `COPY`; FastAPI serves statistics and keyset-paginated queries. The details follow.
 
 ## Architecture
 
@@ -43,7 +71,7 @@ flowchart LR
 
 The API never touches file bytes, and workers never talk to the API: PostgreSQL holds all job state and Redis is only the task queue.
 
-## Quickstart
+## Running it
 
 Prerequisites: [Docker](https://docs.docker.com/get-docker/) (with Compose v2), [uv](https://docs.astral.sh/uv/) and `make`.
 
@@ -87,7 +115,7 @@ There is a light and a dark theme (the button in the header switches them; the c
 
 ![Results, dark theme](docs/images/ui-results-dark.png)
 
-Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)).
+Other targets: `make test`, `make lint`, `make data` (1M-record dataset), `make bench` (runs `make data`, then the benchmark that writes [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)), `make bench-clinvar` (the real-data benchmark that writes [`docs/BENCHMARKS_CLINVAR.md`](docs/BENCHMARKS_CLINVAR.md); downloads ~0.4 GB on first use), `make gif` (re-records the GIF above with Playwright).
 
 > **Windows without `make`**: the Makefile is a thin wrapper, so run the commands it contains. For example, `docker compose up -d --build --wait` is `make up`; the recipes for `demo` and `bench` are two `uv run python scripts/...` lines.
 
@@ -163,6 +191,12 @@ Row semantics worth knowing:
 
 ## Benchmarks
 
+### Real data: ClinVar GRCh38
+
+The [table at the top](#results-on-real-data) comes from [`scripts/benchmark_clinvar.py`](scripts/benchmark_clinvar.py) (`make bench-clinvar`), which writes [`docs/BENCHMARKS_CLINVAR.md`](docs/BENCHMARKS_CLINVAR.md). It downloads a pinned ClinVar release and the UCSC hg38 sequence of the chosen chromosomes, checks both against the MD5 sums their publishers post, and keeps the ClinVar records on those chromosomes. The default subset is chromosomes 1, 2 and 17, the three with the most ClinVar records: the whole GRCh38 reference (3.1 Gb) would be copied into and indexed by every worker container, and records on chromosomes missing from the reference would only measure `unknown_contig`. ClinVar and the synthetic set are then measured in one session, alternating run by run, so drift on the machine hits both alike. The script also runs `bcftools norm -m -any -f` over the same ClinVar records as an independent check of normalization.
+
+### Synthetic, 1M records
+
 1M VCF records (5,000 deliberately invalid; 1,089,328 normalized rows), 10 chunks of 100k, AMD Ryzen 5 7535HS laptop, Docker Desktop with PostgreSQL, Redis, MinIO and the API on the same machine, so this measures the architecture on one host, not a cluster. Median of 3 runs after 1 warm-up. Full methodology, exact commands, `EXPLAIN` plans and raw numbers are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 | Measurement | Result |
@@ -175,7 +209,7 @@ Row semantics worth knowing:
 | Keyset page (101 rows) from the middle of the job | 1.24 ms |
 | Inserting 100k rows: `COPY` vs. SQLAlchemy ORM `add_all` | 0.45 s vs. 15.89 s |
 
-The table is the latest run (`make bench` from a fresh clone). The same benchmark run earlier on the same machine gave 33.7 s / 20.5 s / 17.5 s for 1 / 2 / 4 workers (1.93x at 4), a 28x index speed-up, and 0.33 s vs. 14.47 s for `COPY` vs. the ORM, so treat the ratios and ranges as the result, not the exact figures. Scaling is sub-linear on this machine because the workers share one CPU and one PostgreSQL instance with everything else; [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) lists both sessions side by side and says what was and was not isolated.
+The table is the latest run of `make bench` from a fresh clone; the same 1M records measured next to ClinVar in [the table at the top](#results-on-real-data) gave 30,567 / 57,241 records/s with 1 / 4 workers. The same benchmark run earlier on the same machine gave 33.7 s / 20.5 s / 17.5 s for 1 / 2 / 4 workers (1.93x at 4), a 28x index speed-up, and 0.33 s vs. 14.47 s for `COPY` vs. the ORM, so treat the ratios and ranges as the result, not the exact figures. Scaling is sub-linear on this machine because the workers share one CPU and one PostgreSQL instance with everything else; [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) lists both sessions side by side and says what was and was not isolated.
 
 ## Design decisions
 
@@ -192,7 +226,7 @@ The table is the latest run (`make bench` from a fresh clone). The same benchmar
 ## Testing
 
 ```bash
-make test        # 175 tests; integration tests need `make up` first
+make test        # 180 tests; integration tests need `make up` first
 make lint        # ruff check, ruff format --check, mypy
 ```
 
@@ -221,9 +255,9 @@ src/variant_etl/
   db/         SQLAlchemy models, sessions, analytics queries
   schemas/    Pydantic v2 request/response models
 alembic/      migrations
-scripts/      data generator, demo, benchmark
+scripts/      data generator, demo, benchmarks (synthetic, ClinVar), GIF recorder
 tests/        unit, oracle, integration; tiny fixtures in tests/data
-docs/         BENCHMARKS.md, INTERVIEW.md
+docs/         BENCHMARKS.md, BENCHMARKS_CLINVAR.md, INTERVIEW.md, images/
 ```
 
 MIT licensed.

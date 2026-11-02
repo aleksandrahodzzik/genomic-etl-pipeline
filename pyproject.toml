@@ -62,8 +62,9 @@ ignore = ["RUF012"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]
-# Long f-strings that build the Markdown report read better unwrapped.
+# Long f-strings that build the Markdown reports read better unwrapped.
 "scripts/benchmark.py" = ["E501"]
+"scripts/benchmark_clinvar.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
