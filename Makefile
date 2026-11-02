@@ -1,4 +1,4 @@
-.PHONY: up down test lint data demo-data demo bench bench-clinvar gif space-build space-run space-smoke space-deploy
+.PHONY: up down test lint data demo-data demo bench bench-clinvar gif pages space-build space-run space-smoke space-deploy
 
 # Everything the demo, tests and benchmark talk to. Waits until all long-running services
 # are healthy and the one-shot jobs (migrations, bucket creation) have finished.
@@ -46,6 +46,13 @@ gif:
 	uv run --with playwright==1.64.1 playwright install chromium
 	uv run --with playwright==1.64.1 --with pillow==13.0.0 python scripts/record_ui_gif.py \
 		--url $${SPACE_URL:-http://localhost:7860}
+
+# The project site (GitHub Pages) from a running stack (`make up`): pages/ plus a snapshot of the
+# sample run in site/, then checked in Chromium against the API. Serve site/ with any static server.
+pages:
+	uv run python scripts/export_pages.py --out site
+	uv run --with playwright==1.64.1 playwright install chromium
+	uv run --with playwright==1.64.1 python scripts/pages_smoke.py --site site
 
 # The public demo: every service in one container behind one port (Dockerfile.space).
 space-build:
